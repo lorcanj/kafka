@@ -27,6 +27,7 @@ import org.apache.kafka.streams.processor.assignment.TaskAssignmentUtils.RackAwa
 import org.apache.kafka.streams.processor.assignment.TaskAssignor;
 import org.apache.kafka.streams.processor.assignment.TaskInfo;
 import org.apache.kafka.streams.processor.assignment.TaskTopicPartition;
+import org.apache.kafka.streams.processor.internals.Task;
 import org.apache.kafka.streams.processor.internals.assignment.RackAwareTaskAssignor;
 
 import org.slf4j.Logger;
@@ -36,6 +37,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -47,6 +49,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.unmodifiableMap;
+import static java.util.Map.Entry.comparingByValue;
 
 
 public class StickyTaskAssignor implements TaskAssignor {
@@ -176,9 +179,15 @@ public class StickyTaskAssignor implements TaskAssignor {
             }
         }
 
-        // assign any remaining unassigned tasks
-        final List<TaskId> sortedTasks = new ArrayList<>(unassigned);
-        Collections.sort(sortedTasks);
+        // changed order the unassigned tasks are sorted
+        // might change the ordering
+        // also double check taskInputPartitionCount
+        List<TaskId> sortedTasks = assignmentState.taskInputPartitionCount.entrySet()
+                .stream().filter(entry -> unassigned.contains(entry.getKey()))
+                .sorted(Map.Entry.<TaskId, Integer>comparingByValue().reversed())
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
+
         final Set<ProcessId> candidateClients = clients.stream()
                 .map(KafkaStreamsState::processId)
                 .collect(Collectors.toSet());
