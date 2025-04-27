@@ -146,6 +146,7 @@ public class StickyTaskAssignor implements TaskAssignor {
         final int totalCapacity = computeTotalProcessingThreads(clients);
         final Set<TaskId> allTaskIds = applicationState.allTasks().keySet();
         final int taskCount = allTaskIds.size();
+        // goal for total equality
         final int activeTasksPerThread = taskCount / totalCapacity;
         final Set<TaskId> unassigned = new HashSet<>(allTaskIds);
 
@@ -182,6 +183,7 @@ public class StickyTaskAssignor implements TaskAssignor {
                 .map(KafkaStreamsState::processId)
                 .collect(Collectors.toSet());
         for (final TaskId taskId : sortedTasks) {
+            // if unassigned then need to double check this
             final ProcessId bestClient = assignmentState.findBestClientForTask(taskId, candidateClients);
             assignmentState.finalizeAssignment(taskId, bestClient, AssignedTask.Type.ACTIVE);
         }
@@ -247,6 +249,7 @@ public class StickyTaskAssignor implements TaskAssignor {
         private final Map<TaskId, Set<ProcessId>> previousStandbyAssignment;
         private final Map<TaskId, Integer> taskInputPartitionCount;
         private final double fairPartitionsPerClientThread;
+        private final double averageTaskWeight;
 
         private final TaskPairs taskPairs;
 
@@ -263,11 +266,16 @@ public class StickyTaskAssignor implements TaskAssignor {
 
             this.taskInputPartitionCount = calculateInputPartitionsPerTask(applicationState.allTasks());
 
+            // task weight is partition count
             final int totalPartitionCount = this.taskInputPartitionCount.values().stream().mapToInt(Integer::intValue).sum();
             final int totalNumberOfThreads = clients.values().stream().mapToInt(KafkaStreamsState::numProcessingThreads).sum();
+            // average partitions per thread
             this.fairPartitionsPerClientThread = (double) totalPartitionCount / totalNumberOfThreads;
 
             final int taskCount = applicationState.allTasks().size();
+
+            this.averageTaskWeight = Math.max((double) totalPartitionCount / taskCount, 1.0);
+
             final int maxPairs = taskCount * (taskCount - 1) / 2;
             this.taskPairs = new TaskPairs(maxPairs);
 
@@ -313,6 +321,7 @@ public class StickyTaskAssignor implements TaskAssignor {
             this.newAssignments = optimizedAssignments;
         }
 
+        // want to convert this to sticky assignment
         private boolean hasRoomForActiveTask(final ProcessId processId, final int activeTasksPerThread) {
             final int capacity = clients.get(processId).numProcessingThreads();
             final int newActiveTaskCount = newAssignments.computeIfAbsent(processId, k -> KafkaStreamsAssignment.of(processId, new HashSet<>()))
@@ -320,6 +329,7 @@ public class StickyTaskAssignor implements TaskAssignor {
                 .stream().filter(assignedTask -> assignedTask.type() == AssignedTask.Type.ACTIVE)
                 .collect(Collectors.toSet())
                 .size();
+            // Lorcan
             return newActiveTaskCount < capacity * activeTasksPerThread;
         }
 
@@ -361,6 +371,7 @@ public class StickyTaskAssignor implements TaskAssignor {
         }
 
         // need to change this as is a lot of processing
+        // need to change also because now multiplying by capacity in the shouldBalance check
         private double clientLoadPartitions(final ProcessId processId) {
             final int capacity = clients.get(processId).numProcessingThreads();
             final double totalPartitionCount = newAssignments.get(processId).tasks().keySet().stream().mapToInt(taskId -> this.taskInputPartitionCount.getOrDefault(taskId, 1)).sum();
@@ -439,24 +450,14 @@ public class StickyTaskAssignor implements TaskAssignor {
         private boolean shouldBalanceLoad(final ProcessId client) {
             final double thisClientLoad = clientLoad(client);
             final double thisClientLoadPartition = clientLoadPartitions(client);
-            // Lorcan
+
             // want to keep this and so also want to keep the clientLoad also
             if (thisClientLoad < 1) {
                 return false;
             }
 
-            // if average partitions per thread for client less than total average, no need to balance
-            if (thisClientLoadPartition / thisClientLoad <= fairPartitionsPerClientThread) {
-                return false;
-            }
-
-            //
-            for (final ProcessId otherClient : clients.keySet()) {
-                if (clientLoad(otherClient) < thisClientLoad) {
-                    return true;
-                }
-            }
-            return false;
+            int clientCapacity = clients.get(client).numProcessingThreads();
+            return thisClientLoadPartition * clientCapacity > (fairPartitionsPerClientThread * clientCapacity) + this.averageTaskWeight;
         }
     }
 
