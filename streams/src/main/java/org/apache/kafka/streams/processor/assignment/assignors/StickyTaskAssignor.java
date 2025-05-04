@@ -348,7 +348,7 @@ public class StickyTaskAssignor implements TaskAssignor {
                 return false;
             }
 
-            final int currentClientPartitionSize = newActiveTaskCount.stream().mapToInt(task -> taskInputPartitionCount.getOrDefault(task.id(), 1)).sum();
+            final int currentClientPartitionSize = this.currentClientWeight.getOrDefault(processId, 0);
             final int addedTaskWeight = taskInputPartitionCount.getOrDefault(taskId, 1);
 
             final boolean hasRoom = currentClientPartitionSize + addedTaskWeight < fairPartitionsPerClientThread * capacity + averageTaskWeight;
@@ -387,7 +387,7 @@ public class StickyTaskAssignor implements TaskAssignor {
                 .filter(o -> !unavailableClients.contains(o))
                 .collect(Collectors.toSet());
         }
-        
+
         private double clientLoad(final ProcessId processId) {
             final int capacity = clients.get(processId).numProcessingThreads();
             final double totalTaskCount = newAssignments.get(processId).tasks().size();
@@ -396,6 +396,7 @@ public class StickyTaskAssignor implements TaskAssignor {
 
         private double clientLoadPartitions(final ProcessId processId) {
             final int capacity = clients.get(processId).numProcessingThreads();
+            // client can be 0 if no tasks assigned to it
             final double totalPartitionCount = this.currentClientWeight.getOrDefault(processId, 0);
             return totalPartitionCount / capacity;
         }
