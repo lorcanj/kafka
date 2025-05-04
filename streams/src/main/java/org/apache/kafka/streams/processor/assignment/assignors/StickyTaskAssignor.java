@@ -342,9 +342,11 @@ public class StickyTaskAssignor implements TaskAssignor {
             final var newActiveTaskCount = newAssignments.computeIfAbsent(processId, k -> KafkaStreamsAssignment.of(processId, new HashSet<>()))
                 .tasks().values()
                 .stream().filter(assignedTask -> assignedTask.type() == AssignedTask.Type.ACTIVE)
-                .collect(Collectors.toSet());
+                .collect(Collectors.toSet())
+                .size();
 
-            if (newActiveTaskCount.size() < capacity) {
+            if (newActiveTaskCount >= capacity) {
+                this.processFull.add(processId);
                 return false;
             }
 
@@ -369,7 +371,6 @@ public class StickyTaskAssignor implements TaskAssignor {
                 return findLeastLoadedClient(taskId, clientsWithin);
             }
 
-            // this needs to check if balance with the addition of that extra thing
             if (shouldBalanceLoad(previousClient)) {
                 final ProcessId standby = findLeastLoadedClientWithPreviousStandbyTask(taskId, clientsWithin);
                 if (standby == null || shouldBalanceLoad(standby)) {
@@ -419,7 +420,7 @@ public class StickyTaskAssignor implements TaskAssignor {
             return taskPartitionCount;
         }
 
-        private final void updateClientWeightMap(final ProcessId client, final TaskId taskId) {
+        private void updateClientWeightMap(final ProcessId client, final TaskId taskId) {
             this.currentClientWeight.merge(client, taskInputPartitionCount.getOrDefault(taskId, 1), Integer::sum);
         }
 
@@ -427,8 +428,8 @@ public class StickyTaskAssignor implements TaskAssignor {
             ProcessId leastLoaded = null;
             double minLoad = Double.MAX_VALUE;
 
-            ProcessId leastLoadedTEST = null;
-            double minLoadTEST = Double.MAX_VALUE;
+            ProcessId overallMinLoadClient = null;
+            double minOverallLoad = Double.MAX_VALUE;
 
             for (final ProcessId processId : clientIds) {
                 final double thisClientLoad = clientLoadPartitions(processId);
@@ -445,10 +446,9 @@ public class StickyTaskAssignor implements TaskAssignor {
                     }
                 }
 
-                // track absolute minimum separately
-                if (thisClientLoad < minLoadTEST) {
-                    minLoadTEST = thisClientLoad;
-                    leastLoadedTEST = processId;
+                if (thisClientLoad < minOverallLoad) {
+                    minOverallLoad = thisClientLoad;
+                    overallMinLoadClient = processId;
                 }
             }
 
@@ -456,7 +456,7 @@ public class StickyTaskAssignor implements TaskAssignor {
                 return leastLoaded;
             }
 
-            return leastLoadedTEST;
+            return overallMinLoadClient;
         }
 
         private ProcessId findLeastLoadedClientWithPreviousActiveOrStandbyTask(final TaskId taskId,
@@ -478,11 +478,7 @@ public class StickyTaskAssignor implements TaskAssignor {
 
         private boolean shouldBalanceLoad(final ProcessId client) {
             final double thisClientLoad = clientLoad(client);
-            // System.out.println(this.averageTaskWeight);
-            // System.out.println(client);
-            // System.out.println("CHECK BALANCING");
 
-            // want to keep this and so also want to keep the clientLoad also
             if (thisClientLoad < 1) {
                 return false;
             }
