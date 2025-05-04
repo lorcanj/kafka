@@ -255,8 +255,6 @@ public class CustomStickyTaskAssignorTest {
         StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_BALANCE_SUBTOPOLOGY,
     })
     public void shouldAssignTasksEvenlyWithUnequalTopicGroupSizes(final String rackAwareStrategy) {
-        // Lorcan
-        // check why partition is 0 for some of these tasks, is this expected?
         final Map<TaskId, TaskInfo> tasks = mkMap(
             mkTaskInfo(TASK_1_0, false),
             mkTaskInfo(TASK_0_0, false),

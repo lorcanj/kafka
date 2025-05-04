@@ -145,21 +145,21 @@ public class StickyTaskAssignor implements TaskAssignor {
                                      final boolean mustPreserveActiveTaskAssignment) {
         //final int totalCapacity = computeTotalProcessingThreads(clients);
         final Set<TaskId> allTaskIds = applicationState.allTasks().keySet();
-        //final int taskCount = allTaskIds.size();
+        // final int taskCount = allTaskIds.size();
         // goal for total equality
         // final int activeTasksPerThread = taskCount / totalCapacity;
         final Set<TaskId> unassigned = new HashSet<>(allTaskIds);
 
         // first try and re-assign existing active tasks to clients that previously had
         // the same active task
-        // no size order
         for (final TaskId taskId : assignmentState.previousActiveAssignment.keySet()) {
             if (allTaskIds.contains(taskId)) {
                 final ProcessId previousClientForTask = assignmentState.previousActiveAssignment.get(taskId);
                 if (mustPreserveActiveTaskAssignment || assignmentState.hasRoomForActiveTask(previousClientForTask, taskId)) {
-                    System.out.println("byte");
                     assignmentState.finalizeAssignment(taskId, previousClientForTask, AssignedTask.Type.ACTIVE);
+                    assignmentState.updateClientWeightMap(previousClientForTask, taskId);
                     unassigned.remove(taskId);
+
                 }
             }
         }
@@ -175,6 +175,7 @@ public class StickyTaskAssignor implements TaskAssignor {
                 // a reduction in performance
                 if (assignmentState.hasRoomForActiveTask(client, taskId)) {
                     assignmentState.finalizeAssignment(taskId, client, AssignedTask.Type.ACTIVE);
+                    assignmentState.updateClientWeightMap(client, taskId);
                     iterator.remove();
                     break;
                 }
@@ -199,6 +200,7 @@ public class StickyTaskAssignor implements TaskAssignor {
         for (final TaskId taskId : sortedTasks) {
             final ProcessId bestClient = assignmentState.findBestClientForTask(taskId, candidateClients);
             assignmentState.finalizeAssignment(taskId, bestClient, AssignedTask.Type.ACTIVE);
+            assignmentState.updateClientWeightMap(bestClient, taskId);
         }
     }
 
@@ -223,6 +225,7 @@ public class StickyTaskAssignor implements TaskAssignor {
 
                 final ProcessId bestClient = assignmentState.findBestClientForTask(task.id(), candidateClients);
                 assignmentState.finalizeAssignment(task.id(), bestClient, AssignedTask.Type.STANDBY);
+                assignmentState.updateClientWeightMap(bestClient, task.id());
             }
         }
     }
@@ -261,6 +264,7 @@ public class StickyTaskAssignor implements TaskAssignor {
         private final Map<TaskId, ProcessId> previousActiveAssignment;
         private final Map<TaskId, Set<ProcessId>> previousStandbyAssignment;
         private final Map<TaskId, Integer> taskInputPartitionCount;
+        private final Map<ProcessId, Integer> currentClientWeight;
         private final double fairPartitionsPerClientThread;
         private final int averageTaskWeight;
         private final Set<ProcessId> processFull;
@@ -278,6 +282,7 @@ public class StickyTaskAssignor implements TaskAssignor {
             this.previousActiveAssignment = unmodifiableMap(previousActiveAssignment);
             this.previousStandbyAssignment = unmodifiableMap(previousStandbyAssignment);
             this.processFull = new HashSet<>();
+            this.currentClientWeight = new HashMap<>();
             this.taskInputPartitionCount = calculateInputPartitionsPerTask(applicationState.allTasks());
 
             // task weight is partition count
@@ -293,14 +298,6 @@ public class StickyTaskAssignor implements TaskAssignor {
 
             final int maxPairs = taskCount * (taskCount - 1) / 2;
             this.taskPairs = new TaskPairs(maxPairs);
-
-
-            // need the total number of threads across all clients
-            // need the total weight i.e. summing all the partitions of all tasks across the clients
-            // these need to be for active tasks
-
-            // use this in the calculations
-            // average weight of all tasks
 
             // this.averageTaskWeight = Math.min(Math.floorDiv(this.taskInputPartitionCount.values().stream().mapToInt(Integer::intValue).sum(), taskCount), 1);
 
@@ -390,24 +387,19 @@ public class StickyTaskAssignor implements TaskAssignor {
                 .filter(o -> !unavailableClients.contains(o))
                 .collect(Collectors.toSet());
         }
-
-        // could keep this
-        // but also want to consider the partitions
+        
         private double clientLoad(final ProcessId processId) {
             final int capacity = clients.get(processId).numProcessingThreads();
             final double totalTaskCount = newAssignments.get(processId).tasks().size();
             return totalTaskCount / capacity;
         }
 
-        // need to change this as is a lot of processing
-        // need to change also because now multiplying by capacity in the shouldBalance check
         private double clientLoadPartitions(final ProcessId processId) {
             final int capacity = clients.get(processId).numProcessingThreads();
-            final double totalPartitionCount = newAssignments.get(processId).tasks().keySet().stream().mapToInt(taskId -> this.taskInputPartitionCount.getOrDefault(taskId, 1)).sum();
+            final double totalPartitionCount = this.currentClientWeight.getOrDefault(processId, 0);
             return totalPartitionCount / capacity;
         }
 
-        // but I also need to keep track of the partitions assigned to each client no?
         private Map<TaskId, Integer> calculateInputPartitionsPerTask(final Map<TaskId, TaskInfo> map) {
             final Map<TaskId, Integer> taskPartitionCount = new HashMap<>();
             for (final Map.Entry<TaskId, TaskInfo> entry : map.entrySet()) {
@@ -426,6 +418,10 @@ public class StickyTaskAssignor implements TaskAssignor {
             return taskPartitionCount;
         }
 
+        private final void updateClientWeightMap(final ProcessId client, final TaskId taskId) {
+            this.currentClientWeight.merge(client, taskInputPartitionCount.getOrDefault(taskId, 1), Integer::sum);
+        }
+
         private ProcessId findLeastLoadedClient(final TaskId taskId, final Set<ProcessId> clientIds) {
             ProcessId leastLoaded = null;
             double minLoad = Double.MAX_VALUE;
@@ -434,8 +430,6 @@ public class StickyTaskAssignor implements TaskAssignor {
             double minLoadTEST = Double.MAX_VALUE;
 
             for (final ProcessId processId : clientIds) {
-                // only changing this
-                //
                 final double thisClientLoad = clientLoadPartitions(processId);
                 if (thisClientLoad == 0) {
                     return processId;
@@ -482,19 +476,17 @@ public class StickyTaskAssignor implements TaskAssignor {
         }
 
         private boolean shouldBalanceLoad(final ProcessId client) {
-            // is deciding this differently compared to the original
-            // not balancing load and so leaving a client with a load of 0
             final double thisClientLoad = clientLoad(client);
-            final double thisClientLoadPartition = clientLoadPartitions(client);
-            //System.out.println(this.averageTaskWeight);
-            //System.out.println(client);
-            System.out.println("CHECK BALANCING");
+            // System.out.println(this.averageTaskWeight);
+            // System.out.println(client);
+            // System.out.println("CHECK BALANCING");
 
             // want to keep this and so also want to keep the clientLoad also
             if (thisClientLoad < 1) {
                 return false;
             }
 
+            final double thisClientLoadPartition = clientLoadPartitions(client);
             final int clientCapacity = clients.get(client).numProcessingThreads();
             return thisClientLoadPartition >= fairPartitionsPerClientThread * clientCapacity;
         }
