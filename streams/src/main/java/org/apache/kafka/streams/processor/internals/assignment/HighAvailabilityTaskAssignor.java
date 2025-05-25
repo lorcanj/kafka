@@ -152,6 +152,8 @@ public class HighAvailabilityTaskAssignor implements LegacyTaskAssignor {
 
         final StandbyTaskAssignor standbyTaskAssignor = StandbyTaskAssignorFactory.create(configs, null);
 
+        // Lorcan
+        // problem here?
         standbyTaskAssignor.assign(clientStates, allTaskIds, statefulTasks, configs);
 
         balanceTasksOverThreads(

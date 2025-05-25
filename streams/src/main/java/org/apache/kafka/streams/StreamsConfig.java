@@ -1023,6 +1023,7 @@ public class StreamsConfig extends AbstractConfig {
                     DefaultProductionExceptionHandler.class.getName(),
                     Importance.MEDIUM,
                     PRODUCTION_EXCEPTION_HANDLER_CLASS_DOC)
+                // Lorcan
             .define(TASK_ASSIGNOR_CLASS_CONFIG,
                     Type.STRING,
                     null,

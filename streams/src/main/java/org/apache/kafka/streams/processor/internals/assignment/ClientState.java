@@ -81,7 +81,7 @@ public class ClientState {
         this(null, capacity);
     }
 
-    ClientState(final ProcessId processId, final int capacity) {
+    public ClientState(final ProcessId processId, final int capacity) {
         this(processId, capacity, Collections.emptyMap());
     }
 

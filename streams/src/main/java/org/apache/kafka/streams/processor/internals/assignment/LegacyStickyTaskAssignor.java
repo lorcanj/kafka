@@ -122,6 +122,7 @@ public class LegacyStickyTaskAssignor implements LegacyTaskAssignor {
         }
     }
 
+    // Lorcan
     private void assignStandby(final int numStandbyReplicas) {
         for (final TaskId taskId : statefulTaskIds) {
             for (int i = 0; i < numStandbyReplicas; i++) {

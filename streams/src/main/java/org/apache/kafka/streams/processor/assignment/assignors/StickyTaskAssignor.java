@@ -68,6 +68,7 @@ public class StickyTaskAssignor implements TaskAssignor {
     @Override
     public TaskAssignment assign(final ApplicationState applicationState) {
         final Map<ProcessId, KafkaStreamsState> clients = applicationState.kafkaStreamsStates(false);
+        // not sure if I need the below previous stuff
         final Map<TaskId, ProcessId> previousActiveAssignment = mapPreviousActiveTasks(clients);
         final Map<TaskId, Set<ProcessId>> previousStandbyAssignment = mapPreviousStandbyTasks(clients);
         final AssignmentState assignmentState = new AssignmentState(applicationState, clients,
@@ -187,6 +188,8 @@ public class StickyTaskAssignor implements TaskAssignor {
         }
     }
 
+    // Lorcan
+    // is assigning here
     private static void assignStandby(final ApplicationState applicationState,
                                       final AssignmentState assignmentState) {
         final Set<TaskInfo> statefulTasks = applicationState.allTasks().values().stream()

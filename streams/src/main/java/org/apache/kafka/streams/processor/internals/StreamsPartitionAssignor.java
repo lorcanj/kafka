@@ -793,6 +793,8 @@ public class StreamsPartitionAssignor implements ConsumerPartitionAssignor, Conf
         final Optional<org.apache.kafka.streams.processor.assignment.TaskAssignor> userTaskAssignor =
             customTaskAssignorSupplier.get();
         final UserTaskAssignmentListener customTaskAssignmentListener;
+        // Lorcan
+        // new assignor would be chosen here
         if (userTaskAssignor.isPresent()) {
             final ApplicationState applicationState = buildApplicationState(
                 taskManager.topologyMetadata(),
@@ -813,6 +815,7 @@ public class StreamsPartitionAssignor implements ConsumerPartitionAssignor, Conf
                 }
             };
         } else {
+            // below uses the legacy assignor where assign returns a boolean
             customTaskAssignmentListener = (assignment, subscription) -> { };
             final LegacyTaskAssignor taskAssignor = createTaskAssignor(lagComputationSuccessful);
             final RackAwareTaskAssignor rackAwareTaskAssignor = new RackAwareTaskAssignor(
