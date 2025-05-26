@@ -193,8 +193,11 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         standbyTaskAssignor.assign(clientStatesOLD, applicationState.allTasks().keySet(), statefulTasks, applicationState.assignmentConfigs());
 
         balanceTasksOverThreads(
-                assignmentState.newAssignments
-
+                assignmentState.mapProcessToClientStateRebalanceDTO,
+                HighAvailabilityClientState::standbyTasks,
+                HighAvailabilityClientState::unassignStandby,
+                HighAvailabilityClientState::assignStandby,
+                (source, destination) -> standbyTaskAssignor.isAllowedTaskMovement(source, destination)
         );
     }
 
@@ -246,8 +249,6 @@ public class HighAvailabilityAssignor implements TaskAssignor {
     // should only have a single assignmentState
 
     static class AssignmentState {
-        // what is clients?
-        private final Map<ProcessId, KafkaStreamsState> clients;
         private Map<ProcessId, KafkaStreamsAssignment> newAssignments;
         private final SortedMap<ProcessId, HighAvailabilityClientState> mapProcessToClientStateRebalanceDTO;
 
@@ -255,7 +256,6 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         AssignmentState(final ApplicationState applicationState,
                         final Map<ProcessId, KafkaStreamsState> clients) {
 
-            this.clients = clients;
             // Lorcan
             // this should only be properly populated at the end
             this.newAssignments = clients.values().stream().collect(Collectors.toMap(
@@ -277,9 +277,6 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         private void finalizeAssignment(final TaskId taskId, final ProcessId client, final KafkaStreamsAssignment.AssignedTask.Type type) {
             // currently null pointer but will just want to update this at the end
             newAssignments.get(client).assignTask(new KafkaStreamsAssignment.AssignedTask(taskId, type));
-
-            // not sure if I need the below, leave it out for the moment
-            // newTaskLocations.computeIfAbsent(taskId, k -> new HashSet<>()).add(client);
         }
 
         private static boolean shouldMoveATask(final HighAvailabilityClientState sourceClientState, final HighAvailabilityClientState destinationClientState) {
@@ -366,6 +363,8 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         public Set<TaskId> activeTasks() {
             return unmodifiableSet(assignedActiveTasks.taskIds());
         }
+
+        public Set<TaskId> standbyTasks() { return unmodifiableSet(assignedStandbyTasks.taskIds()); }
 
         public void assignActive(final TaskId task) {
             assertNotAssigned(task);
