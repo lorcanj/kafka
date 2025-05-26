@@ -6,6 +6,7 @@ import org.apache.kafka.streams.processor.assignment.ApplicationState;
 import org.apache.kafka.streams.processor.assignment.KafkaStreamsAssignment;
 import org.apache.kafka.streams.processor.assignment.KafkaStreamsState;
 import org.apache.kafka.streams.processor.assignment.ProcessId;
+import org.apache.kafka.streams.processor.assignment.TaskAssignmentUtils;
 import org.apache.kafka.streams.processor.assignment.TaskAssignor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -130,13 +131,46 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         // TODO: balanceTasksOverThread need to add this
         balanceTasksOverThreads(
                 assignmentState.mapProcessToClientStateRebalanceDTO,
-
-
+                HighAvailabilityClientState::activeTasks,
+                HighAvailabilityClientState::unassignActive,
+                HighAvailabilityClientState::assignActive,
+                (source, destination) -> true
         );
+
+        populateNewAssignments(assignmentState);
 
         // at this point will want to populate the processId map to KafkaStreamsState to then use the Utils stuff for rack optimisation
 
-        // TODO: add rack stuff
+        // using the assignmentStateDTO need to create/ populate the assignmentState.newAssignments
+        final Map<ProcessId, KafkaStreamsAssignment> currentAssignments = assignmentState.newAssignments;
+
+        final TaskAssignmentUtils.RackAwareOptimizationParams statefulTaskParams = TaskAssignmentUtils.RackAwareOptimizationParams.of(applicationState)
+                .withTrafficCostOverride(
+                        applicationState.assignmentConfigs().rackAwareTrafficCost().orElse(DEFAULT_HIGH_AVAILABILITY_TRAFFIC_COST)
+                )
+                .withNonOverlapCostOverride(
+                        applicationState.assignmentConfigs().rackAwareNonOverlapCost().orElse(DEFAULT_HIGH_AVAILABILITY_NON_OVERLAP_COST)
+                )
+                .forStatefulTasks();
+        TaskAssignmentUtils.optimizeRackAwareActiveTasks(statefulTaskParams, currentAssignments);
+
+        TaskAssignmentUtils.optimizeRackAwareActiveTasks(
+                TaskAssignmentUtils.RackAwareOptimizationParams.of(applicationState)
+                        .forStatelessTasks()
+                        .withTrafficCostOverride(RackAwareTaskAssignor.STATELESS_TRAFFIC_COST)
+                        .withNonOverlapCostOverride(RackAwareTaskAssignor.STATELESS_NON_OVERLAP_COST),
+                currentAssignments
+        );
+        assignmentState.newAssignments = currentAssignments;
+    }
+
+    private static void populateNewAssignments(AssignmentState assignmentState) {
+        for (var thing : assignmentState.mapProcessToClientStateRebalanceDTO.entrySet()) {
+            // probably will want to make generic
+            for (var blah : thing.getValue().activeTasks()) {
+                assignmentState.finalizeAssignment(blah, thing.getKey(), KafkaStreamsAssignment.AssignedTask.Type.ACTIVE);
+            }
+        }
     }
 
     // problem
@@ -162,16 +196,6 @@ public class HighAvailabilityAssignor implements TaskAssignor {
                 assignmentState.newAssignments
 
         );
-
-
-
-
-
-
-
-
-
-
     }
 
     //
@@ -224,8 +248,8 @@ public class HighAvailabilityAssignor implements TaskAssignor {
     static class AssignmentState {
         // what is clients?
         private final Map<ProcessId, KafkaStreamsState> clients;
-        private final Map<ProcessId, KafkaStreamsAssignment> newAssignments;
-        private final Map<ProcessId, HighAvailabilityClientState> mapProcessToClientStateRebalanceDTO;
+        private Map<ProcessId, KafkaStreamsAssignment> newAssignments;
+        private final SortedMap<ProcessId, HighAvailabilityClientState> mapProcessToClientStateRebalanceDTO;
 
         // do I need assigned active and assigned standby
         AssignmentState(final ApplicationState applicationState,
@@ -240,7 +264,8 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             ));
 
             // creates blank HAClientState objects so that we can start assigning and tracking the stuff
-            this.mapProcessToClientStateRebalanceDTO = clients.values().stream().collect(Collectors.toMap(
+            // need sortedMap because of the balance threads function
+            this.mapProcessToClientStateRebalanceDTO = (SortedMap<ProcessId, HighAvailabilityClientState>) clients.values().stream().collect(Collectors.toMap(
                     KafkaStreamsState::processId,
                     state -> new HighAvailabilityClientState(state.processId())
             ));
