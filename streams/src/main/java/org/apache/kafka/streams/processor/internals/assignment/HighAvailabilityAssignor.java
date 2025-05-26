@@ -96,27 +96,41 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         return legacyClientStates;
     }
 
+    // here we want to loop in a similar way to the original method
     private static void assignActiveStatefulTasks(final ApplicationState applicationState,
                                                   final AssignmentState assignmentState,
                                                   final SortedSet<TaskId> statefulTasks,
                                                   final Collection<KafkaStreamsState> clients) {
-        // ugly but might be it
-        final List<TaskId> sortedStatefulTasks = new ArrayList<>(statefulTasks);
-        Collections.sort(sortedStatefulTasks);
-        final SortedSet<ProcessId> candidateClients = (SortedSet<ProcessId>) clients.stream()
-                .map(KafkaStreamsState::processId)
-                .collect(Collectors.toSet());
-        Iterator<ProcessId> consumerClientIdIterator = null;
-        for (final TaskId task : sortedStatefulTasks) {
-            if (consumerClientIdIterator == null || !consumerClientIdIterator.hasNext()) {
-                consumerClientIdIterator = candidateClients.iterator();
-            }
 
-            assignmentState.finalizeAssignment(task, consumerClientIdIterator.next(), KafkaStreamsAssignment.AssignedTask.Type.ACTIVE);
+        Iterator<HighAvailabilityClientState> highAvailabilityClientStateIterator = null;
+        for (final TaskId task : statefulTasks) {
+            if (highAvailabilityClientStateIterator == null || !highAvailabilityClientStateIterator.hasNext()) {
+                highAvailabilityClientStateIterator = assignmentState.mapProcessToClientStateRebalanceDTO.values().iterator();
+            }
+            highAvailabilityClientStateIterator.next().assignActive(task);
         }
+
+        // Lorcan
+        // commented out the below because want to use the HAA client object
+//        // ugly but might be it
+//        final List<TaskId> sortedStatefulTasks = new ArrayList<>(statefulTasks);
+//        Collections.sort(sortedStatefulTasks);
+//        final SortedSet<ProcessId> candidateClients = (SortedSet<ProcessId>) clients.stream()
+//                .map(KafkaStreamsState::processId)
+//                .collect(Collectors.toSet());
+//        Iterator<ProcessId> consumerClientIdIterator = null;
+//        for (final TaskId task : sortedStatefulTasks) {
+//            if (consumerClientIdIterator == null || !consumerClientIdIterator.hasNext()) {
+//                consumerClientIdIterator = candidateClients.iterator();
+//            }
+//
+//            assignmentState.finalizeAssignment(task, consumerClientIdIterator.next(), KafkaStreamsAssignment.AssignedTask.Type.ACTIVE);
+//        }
 
         // TODO: balanceTasksOverThread need to add this
         balanceTasksOverThreads(
+                assignmentState.mapProcessToClientStateRebalanceDTO,
+
 
         );
 
@@ -134,8 +148,7 @@ public class HighAvailabilityAssignor implements TaskAssignor {
                                                   final AssignmentState assignmentState,
                                                   final SortedSet<TaskId> statefulTasks,
                                                   final Collection<KafkaStreamsState> clients,
-                                                  final TreeMap<ProcessId, ClientState> clientStatesOLD,
-                                                  final TreeMap<>) {
+                                                  final TreeMap<ProcessId, ClientState> clientStatesOLD) {
 
         if (applicationState.assignmentConfigs().numStandbyReplicas() == 0) {
             return;
@@ -219,27 +232,19 @@ public class HighAvailabilityAssignor implements TaskAssignor {
                         final Map<ProcessId, KafkaStreamsState> clients) {
 
             this.clients = clients;
-            // this should only be populated at the end
-            this.newAssignments = null;
-
-//                    clients.values().stream().collect(Collectors.toMap(
-//                    KafkaStreamsState::processId,
-//                    state -> KafkaStreamsAssignment.of(state.processId(), new HashSet<>())
-//            ));
+            // Lorcan
+            // this should only be properly populated at the end
+            this.newAssignments = clients.values().stream().collect(Collectors.toMap(
+                    KafkaStreamsState::processId,
+                    state -> KafkaStreamsAssignment.of(state.processId(), new HashSet<>())
+            ));
 
             // creates blank HAClientState objects so that we can start assigning and tracking the stuff
             this.mapProcessToClientStateRebalanceDTO = clients.values().stream().collect(Collectors.toMap(
                     KafkaStreamsState::processId,
                     state -> new HighAvailabilityClientState(state.processId())
             ));
-            var thing = clients.values().stream().collect(Collectors.toMap(
-                    KafkaStreamsState::processId,
-                    state -> KafkaStreamsAssignment.of(state.processId(), new HashSet<>())
-            ));
         }
-
-
-
 
         // TODO: might need to update this
         // need this to update mapProcessToClientStateRebalanceDTO
