@@ -1,6 +1,5 @@
 package org.apache.kafka.streams.processor.internals.assignment;
 
-import com.sun.source.tree.Tree;
 import org.apache.kafka.streams.processor.TaskId;
 import org.apache.kafka.streams.processor.assignment.ApplicationState;
 import org.apache.kafka.streams.processor.assignment.KafkaStreamsAssignment;
@@ -8,29 +7,32 @@ import org.apache.kafka.streams.processor.assignment.KafkaStreamsState;
 import org.apache.kafka.streams.processor.assignment.ProcessId;
 import org.apache.kafka.streams.processor.assignment.TaskAssignmentUtils;
 import org.apache.kafka.streams.processor.assignment.TaskAssignor;
+import org.apache.kafka.streams.processor.internals.Task;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
+import java.time.Instant;
 import java.util.Collection;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.unmodifiableSet;
+import static org.apache.kafka.common.utils.Utils.diff;
+import static org.apache.kafka.streams.processor.internals.assignment.TaskMovement.assignActiveTaskMovements;
+import static org.apache.kafka.streams.processor.internals.assignment.TaskMovement.assignStandbyTaskMovements;
 
 
 public class HighAvailabilityAssignor implements TaskAssignor {
@@ -55,18 +57,66 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         // to reduce the number of changes I need to make
         final TreeMap<ProcessId, ClientState> clientStatesOLD = translateToLegacyClientStateMap(clientStates);
 
+
         assignActiveStatefulTasks(applicationState, assignmentState, statefulTasks, clients.values());
 
-        // TODO: need to check this is correct
         // the below needs the old ClientStates
         assignStandbyReplicaTasks(applicationState, assignmentState, statefulTasks, clients.values(), clientStatesOLD);
 
+        final AtomicInteger remainingWarmupReplicas = new AtomicInteger(applicationState.assignmentConfigs().maxWarmupReplicas());
 
+        final Map<TaskId, SortedSet<ProcessId>> tasksToCaughtUpClients = AssignmentState.tasksToCaughtUpClients(
+                statefulTasks,
+                assignmentState.mapProcessToClientStateRebalanceDTO,
+                // below is ugly
+                applicationState.assignmentConfigs().acceptableRecoveryLag(),
+                applicationState
+        );
 
+        final Map<TaskId, SortedSet<ProcessId>> tasksToClientByLag = AssignmentState.tasksToClientByLag(statefulTasks, assignmentState.mapProcessToClientStateRebalanceDTO, applicationState);
 
-        return null;
+        // We temporarily need to know which standby tasks were intended as warmups
+        // for active tasks, so that we don't move them (again) when we plan standby
+        // task movements. We can then immediately treat warmups exactly the same as
+        // hot-standby replicas, so we just track it right here as metadata, rather
+        // than add "warmup" assignments to ClientState, for example.
+        final Map<ProcessId, Set<TaskId>> warmups = new TreeMap<>();
+
+        final int neededActiveTaskMovements = assignActiveTaskMovements(
+                tasksToCaughtUpClients,
+                tasksToClientByLag,
+                // might be wrong as stale data
+                clientStatesOLD,
+                warmups,
+                remainingWarmupReplicas
+        );
+
+        final int neededStandbyTaskMovements = assignStandbyTaskMovements(
+                tasksToCaughtUpClients,
+                tasksToClientByLag,
+                clientStatesOLD,
+                remainingWarmupReplicas,
+                warmups
+        );
+
+        assignStatelessActiveTasks(applicationState, assignmentState, diff(TreeSet::new, applicationState.allTasks().keySet(), statefulTasks));
+
+        final Map<ProcessId, KafkaStreamsAssignment> finalAssignments = assignmentState.newAssignments;
+
+        boolean probingRebalanceNeeded = neededActiveTaskMovements + neededStandbyTaskMovements > 0;
+
+        // taken from StickyTaskAssignor
+        if (probingRebalanceNeeded && !finalAssignments.isEmpty()) {
+            // We set the followup deadline for only one of the clients.
+            final ProcessId clientId = finalAssignments.entrySet().iterator().next().getKey();
+            final KafkaStreamsAssignment previousAssignment = finalAssignments.get(clientId);
+            finalAssignments.put(clientId, previousAssignment.withFollowupRebalance(Instant.ofEpochMilli(0)));
+        }
+
+        return new TaskAssignment(finalAssignments.values());
     }
 
+    // TODO: need to complete this
     // below not done properly
     private TreeMap<ProcessId, ClientState> translateToLegacyClientStateMap(
             final Map<ProcessId, KafkaStreamsState> newStates) {
@@ -137,7 +187,7 @@ public class HighAvailabilityAssignor implements TaskAssignor {
                 (source, destination) -> true
         );
 
-        populateNewAssignments(assignmentState);
+        populateNewActiveAssignments(assignmentState);
 
         // at this point will want to populate the processId map to KafkaStreamsState to then use the Utils stuff for rack optimisation
 
@@ -156,6 +206,10 @@ public class HighAvailabilityAssignor implements TaskAssignor {
 
         TaskAssignmentUtils.optimizeRackAwareActiveTasks(
                 TaskAssignmentUtils.RackAwareOptimizationParams.of(applicationState)
+                        // is the below wrong as this should be for stateful tasks
+                        // shouldn't this be for StatefulTasks??
+                        // Lorcan
+                        // TODO: fix for stateful
                         .forStatelessTasks()
                         .withTrafficCostOverride(RackAwareTaskAssignor.STATELESS_TRAFFIC_COST)
                         .withNonOverlapCostOverride(RackAwareTaskAssignor.STATELESS_NON_OVERLAP_COST),
@@ -164,7 +218,7 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         assignmentState.newAssignments = currentAssignments;
     }
 
-    private static void populateNewAssignments(AssignmentState assignmentState) {
+    private static void populateNewActiveAssignments(AssignmentState assignmentState) {
         for (var thing : assignmentState.mapProcessToClientStateRebalanceDTO.entrySet()) {
             // probably will want to make generic
             for (var blah : thing.getValue().activeTasks()) {
@@ -173,10 +227,61 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         }
     }
 
-    // problem
-    // we are assigning with the KafkaStreamsState, but need more information
-    // than this class contains
-    // which is why I created the HighAvailabilityClientState to use as the class during the rebalance
+    private static void populateNewStandbyAssignments(AssignmentState assignmentState) {
+        for (var thing : assignmentState.mapProcessToClientStateRebalanceDTO.entrySet()) {
+            // probably will want to make generic
+            for (var blah : thing.getValue().standbyTasks()) {
+                assignmentState.finalizeAssignment(blah, thing.getKey(), KafkaStreamsAssignment.AssignedTask.Type.STANDBY);
+            }
+        }
+    }
+
+    private static void assignStatelessActiveTasks(ApplicationState applicationState,
+                                                   AssignmentState assignmentState,
+                                                   Iterable<TaskId> statelessTasks) {
+
+        final ConstrainedPrioritySet statelessActiveTaskClientsByTaskLoad = new ConstrainedPrioritySet(
+                (client, task) -> true,
+                client -> assignmentState.mapProcessToClientStateRebalanceDTO.get(client).   activeTaskLoad()
+        );
+        statelessActiveTaskClientsByTaskLoad.offerAll(assignmentState.mapProcessToClientStateRebalanceDTO.keySet());
+
+        // Lorcan, not sure about this treeset
+        // final SortedSet<TaskId> sortedTasks = new TreeSet<>();
+        for (final TaskId task : statelessTasks) {
+            // sortedTasks.add(task);
+            final ProcessId client = statelessActiveTaskClientsByTaskLoad.poll(task);
+            final HighAvailabilityClientState state = assignmentState.mapProcessToClientStateRebalanceDTO.get(client);
+            state.assignActive(task);
+            statelessActiveTaskClientsByTaskLoad.offer(client);
+        }
+
+        // might be wrong as not 100% sure if can use this for the stateless active tasks
+        // Lorcan
+        // TODO: check as not sure if this is right for stateless tasks
+        populateNewActiveAssignments(assignmentState);
+
+        final Map<ProcessId, KafkaStreamsAssignment> currentAssignments = assignmentState.newAssignments;
+
+        final TaskAssignmentUtils.RackAwareOptimizationParams statefulTaskParams = TaskAssignmentUtils.RackAwareOptimizationParams.of(applicationState)
+                .withTrafficCostOverride(
+                        applicationState.assignmentConfigs().rackAwareTrafficCost().orElse(DEFAULT_HIGH_AVAILABILITY_TRAFFIC_COST)
+                )
+                .withNonOverlapCostOverride(
+                        applicationState.assignmentConfigs().rackAwareNonOverlapCost().orElse(DEFAULT_HIGH_AVAILABILITY_NON_OVERLAP_COST)
+                )
+                .forStatelessTasks();
+        TaskAssignmentUtils.optimizeRackAwareActiveTasks(statefulTaskParams, currentAssignments);
+
+        TaskAssignmentUtils.optimizeRackAwareActiveTasks(
+                TaskAssignmentUtils.RackAwareOptimizationParams.of(applicationState)
+                        .forStatelessTasks()
+                        .withTrafficCostOverride(RackAwareTaskAssignor.STATELESS_TRAFFIC_COST)
+                        .withNonOverlapCostOverride(RackAwareTaskAssignor.STATELESS_NON_OVERLAP_COST),
+                currentAssignments
+        );
+        assignmentState.newAssignments = currentAssignments;
+    }
 
     private static void assignStandbyReplicaTasks(final ApplicationState applicationState,
                                                   final AssignmentState assignmentState,
@@ -192,16 +297,77 @@ public class HighAvailabilityAssignor implements TaskAssignor {
 
         standbyTaskAssignor.assign(clientStatesOLD, applicationState.allTasks().keySet(), statefulTasks, applicationState.assignmentConfigs());
 
-        balanceTasksOverThreads(
+        balanceTasksOverThreadsClientState(
                 assignmentState.mapProcessToClientStateRebalanceDTO,
                 HighAvailabilityClientState::standbyTasks,
                 HighAvailabilityClientState::unassignStandby,
                 HighAvailabilityClientState::assignStandby,
-                (source, destination) -> standbyTaskAssignor.isAllowedTaskMovement(source, destination)
+                // below uses the ClientState objects
+                standbyTaskAssignor::isAllowedTaskMovement,
+                clientStatesOLD
         );
+
+        populateNewStandbyAssignments(assignmentState);
+
+        // not sure about this for standby
+        final Map<ProcessId, KafkaStreamsAssignment> currentAssignments = assignmentState.newAssignments;
+
+        final TaskAssignmentUtils.RackAwareOptimizationParams optimizationParams = TaskAssignmentUtils.RackAwareOptimizationParams.of(applicationState)
+                .withTrafficCostOverride(
+                        applicationState.assignmentConfigs().rackAwareTrafficCost().orElse(DEFAULT_HIGH_AVAILABILITY_TRAFFIC_COST)
+                )
+                .withNonOverlapCostOverride(
+                        applicationState.assignmentConfigs().rackAwareNonOverlapCost().orElse(DEFAULT_HIGH_AVAILABILITY_NON_OVERLAP_COST)
+                );
+
+        TaskAssignmentUtils.optimizeRackAwareStandbyTasks(optimizationParams, currentAssignments);
+        assignmentState.newAssignments = currentAssignments;
     }
 
-    //
+    // ugly but might work
+    private static void balanceTasksOverThreadsClientState(final SortedMap<ProcessId, HighAvailabilityClientState> clientStates,
+                                                final Function<HighAvailabilityClientState, Set<TaskId>> currentAssignmentAccessor,
+                                                final BiConsumer<HighAvailabilityClientState, TaskId> taskUnassignor,
+                                                final BiConsumer<HighAvailabilityClientState, TaskId> taskAssignor,
+                                                final BiPredicate<ClientState, ClientState> taskMovementAttemptPredicate,
+                                                final SortedMap<ProcessId, ClientState> clientStatesOLD) {
+        boolean keepBalancing = true;
+        while (keepBalancing) {
+            keepBalancing = false;
+            for (final Map.Entry<ProcessId, HighAvailabilityClientState> sourceEntry : clientStates.entrySet()) {
+                final ProcessId sourceClient = sourceEntry.getKey();
+                final HighAvailabilityClientState sourceClientAssignmentState = sourceEntry.getValue();
+                // Lorcan, not 100% sure about this
+                final ClientState sourceClientState = clientStatesOLD.get(sourceEntry.getKey());
+
+                for (final Map.Entry<ProcessId, HighAvailabilityClientState> destinationEntry : clientStates.entrySet()) {
+                    final ProcessId destinationClient = destinationEntry.getKey();
+                    final HighAvailabilityClientState destinationClientAssignmentState = destinationEntry.getValue();
+                    if (sourceClient.equals(destinationClient)) {
+                        continue;
+                    }
+                    final ClientState destinationclientState = clientStatesOLD.get(destinationEntry.getKey());
+
+                    final Set<TaskId> sourceTasks = new TreeSet<>(currentAssignmentAccessor.apply(sourceClientAssignmentState));
+                    final Iterator<TaskId> sourceIterator = sourceTasks.iterator();
+                    // re-ordered these
+                    while (sourceIterator.hasNext() && AssignmentState.shouldMoveATask(sourceClientAssignmentState, destinationClientAssignmentState)) {
+                        final TaskId taskToMove = sourceIterator.next();
+                        final boolean canMove = !destinationClientAssignmentState.hasAssignedTask(taskToMove)
+                                // When ClientTagAwareStandbyTaskAssignor is used, we need to make sure that
+                                // sourceClient tags matches destinationClient tags.
+                                && taskMovementAttemptPredicate.test(sourceClientState, destinationclientState);
+                        if (canMove) {
+                            taskUnassignor.accept(sourceClientAssignmentState, taskToMove);
+                            taskAssignor.accept(destinationClientAssignmentState, taskToMove);
+                            keepBalancing = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private static void balanceTasksOverThreads(final SortedMap<ProcessId, HighAvailabilityClientState> clientStates,
                                                 final Function<HighAvailabilityClientState, Set<TaskId>> currentAssignmentAccessor,
                                                 final BiConsumer<HighAvailabilityClientState, TaskId> taskUnassignor,
@@ -298,6 +464,55 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             // we should only move a task if doing so would actually improve the skew.
             return proposedSkew < skew;
         }
+
+        private static Map<TaskId, SortedSet<ProcessId>> tasksToCaughtUpClients(final Set<TaskId> statefulTasks,
+                                                                                final Map<ProcessId, HighAvailabilityClientState> clientStates,
+                                                                                final long acceptableRecoveryLag,
+                                                                                final ApplicationState applicationState) {
+            final Map<TaskId, SortedSet<ProcessId>> taskToCaughtUpClients = new HashMap<>();
+
+            for (final TaskId task : statefulTasks) {
+                final TreeSet<ProcessId> caughtUpClients = new TreeSet<>();
+                for (final Map.Entry<ProcessId, HighAvailabilityClientState> clientEntry : clientStates.entrySet()) {
+                    final ProcessId client = clientEntry.getKey();
+                    // not sure if this should be true or false;
+                    // not sure if this is correct but it might be
+                    final long taskLag = applicationState.kafkaStreamsStates(false).get(client).lagFor(task);
+                    // final long taskLag = clientEntry.getValue().lagFor(task);
+                    if (activeRunning(taskLag) || unbounded(acceptableRecoveryLag) || acceptable(acceptableRecoveryLag, taskLag)) {
+                        caughtUpClients.add(client);
+                    }
+                }
+                taskToCaughtUpClients.put(task, caughtUpClients);
+            }
+            return taskToCaughtUpClients;
+        }
+
+        private static Map<TaskId, SortedSet<ProcessId>> tasksToClientByLag(final Set<TaskId> statefulTasks,
+                                                                            final Map<ProcessId, HighAvailabilityClientState> clientStates,
+                                                                            ApplicationState applicationState) {
+            final Map<TaskId, SortedSet<ProcessId>> tasksToClientByLag = new HashMap<>();
+            for (final TaskId task : statefulTasks) {
+                final SortedSet<ProcessId> clientLag = new TreeSet<>(Comparator.<ProcessId>comparingLong(a ->
+                        // not 100% sure about the below
+                        applicationState.kafkaStreamsStates(false).get(a).lagFor(task)).thenComparing(a -> a));
+                clientLag.addAll(clientStates.keySet());
+                tasksToClientByLag.put(task, clientLag);
+            }
+            return tasksToClientByLag;
+        }
+
+        private static boolean unbounded(final long acceptableRecoveryLag) {
+            return acceptableRecoveryLag == Long.MAX_VALUE;
+        }
+
+        private static boolean acceptable(final long acceptableRecoveryLag, final long taskLag) {
+            return taskLag >= 0 && taskLag <= acceptableRecoveryLag;
+        }
+
+        private static boolean activeRunning(final long taskLag) {
+            return taskLag == Task.LATEST_OFFSET;
+        }
     }
 
     // used to hold the data during the assignment
@@ -333,7 +548,12 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         // not sure if I need the complexity of these classes
         private final AssignmentClientStateTask assignedStandbyTasks = new AssignmentClientStateTask(new TreeSet<>(), new TreeMap<>());
         private final AssignmentClientStateTask assignedActiveTasks = new AssignmentClientStateTask(new TreeSet<>(), new TreeMap<>());
+
+        // Lorcan
+        // not sure if I need this as might be in the application state
         private int capacity;
+        // need this to map this object to the ClientState objects
+        private ProcessId processId;
 
         public HighAvailabilityClientState (final ProcessId processId) {
         }
@@ -398,5 +618,24 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             }
             taskIds.remove(task);
         }
+
+        double activeTaskLoad() {
+            return ((double) activeTaskCount()) / capacity;
+        }
+
+//        /**
+//         * Returns the total lag across all logged stores in the task. Equal to the end offset sum if this client
+//         * did not have any state for this task on disk.
+//         *
+//         * @return end offset sum - offset sum
+//         *          Task.LATEST_OFFSET if this was previously an active running task on this client
+//         */
+//        public long lagFor(final TaskId task) {
+//            final Long totalLag = taskLagTotals.get(task);
+//            if (totalLag == null) {
+//                throw new IllegalStateException("Tried to lookup lag for unknown task " + task);
+//            }
+//            return totalLag;
+//        }
     }
 }
