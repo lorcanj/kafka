@@ -1,0 +1,12 @@
+AssignmentState has mapProcessToClientStateRebalanceDTO to be used during the rebalance
+
+assignActiveStatefulTasks() assigns active tasks to the HAAClientState
+
+balanceTasksOverThreads() optimises this (ok for the active version)
+
+populateNewActiveAssignments() assigns these to the newAssignments
+
+optimiseActiveStatefulTasks() does rack aware balancing on the newAssignments map
+
+--> now mapProcessToClientStateRebalanceDTO is stale
+
