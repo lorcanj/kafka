@@ -10,3 +10,11 @@ optimiseActiveStatefulTasks() does rack aware balancing on the newAssignments ma
 
 --> now mapProcessToClientStateRebalanceDTO is stale
 
+1. Update mapProcessToClientStateRebalanceDTO with up to date assignment
+
+want to populate ClientState map with mapProcessToClientStateRebalanceDTO
+
+2. populate ClientState map
+
+Will there be a problem if there is missing data as HAAClientState does not contain all the information?
+
