@@ -76,6 +76,8 @@ public class HighAvailabilityAssignor implements TaskAssignor {
 
         // need to update DTO and clientStateOLD with the standby assignments in new assignments
 
+
+
         // Lorcan - might be done with the above
         final AtomicInteger remainingWarmupReplicas = new AtomicInteger(applicationState.assignmentConfigs().maxWarmupReplicas());
         // TODO: issue potentially with this
@@ -180,6 +182,14 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         return legacyClientStates;
     }
 
+    private void updateDTOAndClientStateStandbys(AssignmentState assignmentState) {
+
+        for (var thing : assignmentState.mapProcessToClientStateRebalanceDTO.entrySet()) {
+            ProcessId currentProcessId = thing.getKey();
+            thing.getValue()
+        }
+    }
+
     // when do I need to update this?
     // after rackOptimisation?
     private void resetAndUpdateDTOMapActiveTasks(AssignmentState assignmentState) {
@@ -195,7 +205,33 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         }
     }
 
-    private static void resetAndUpdateDTOMapStandbyTasks(AssignmentState assignmentState) {
+    // loop over mapProcessToClientStateRebalanceDTO rather than clientStateMap might be wrong
+    private static void resetAndUpdateDTOMapStandbyTasks(AssignmentState assignmentState, Map<ProcessId, ClientState> clientStateMap) {
+        for (var thing : assignmentState.mapProcessToClientStateRebalanceDTO.entrySet()) {
+            thing.getValue().assignedStandbyTasks.taskIds.clear();
+
+            Set<TaskId> standbyTaskIds = clientStateMap.get(thing.getKey()).standbyTasks();
+            thing.getValue().assignedStandbyTasks.setTaskIds(standbyTaskIds);
+        }
+    }
+
+    private static void updateDTOMapAndClientStateStandbyTasks(AssignmentState assignmentState, Map<ProcessId, ClientState> clientStateMap) {
+        // TODO lorcan update
+        for (var thing : assignmentState.newAssignments.entrySet()) {
+            Set<TaskId> standbyTasks = thing.getValue().tasks().entrySet()
+                    .stream()
+                    .filter(input -> input.getValue().type() == STANDBY)
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.toSet());
+
+            assignmentState.mapProcessToClientStateRebalanceDTO.get(thing.getKey()).assignedStandbyTasks.taskIds.clear();
+            assignmentState.mapProcessToClientStateRebalanceDTO.get(thing.getKey()).assignedStandbyTasks.setTaskIds(standbyTasks);
+
+            ClientState clientState = clientStateMap.get(thing.getKey());
+            clientState.
+
+        }
+
         for (var thing : assignmentState.mapProcessToClientStateRebalanceDTO.entrySet()) {
             thing.getValue().assignedStandbyTasks.taskIds.clear();
 
@@ -371,8 +407,13 @@ public class HighAvailabilityAssignor implements TaskAssignor {
 
         // above has assigned using the ClientState map
         // so now the most up to date assignment for standby tasks is in clientStatesOLD
-        resetAndUpdateDTOMapStandbyTasks(assignmentState);
 
+        // shouldn't this use clientStatesOLD to update the state?
+        // Yes
+        // TODO: the below is wrong, should update using the clientStates map
+        resetAndUpdateDTOMapStandbyTasks(assignmentState, clientStatesOLD);
+
+        // now clientStatesOLD and mapProcessToClientStateRebalanceDTO are up to date
         balanceTasksOverThreadsClientState(
                 assignmentState.mapProcessToClientStateRebalanceDTO,
                 HighAvailabilityClientState::standbyTasks,
@@ -381,8 +422,9 @@ public class HighAvailabilityAssignor implements TaskAssignor {
                 standbyTaskAssignor::isAllowedTaskMovement,
                 clientStatesOLD
         );
-
+        // from this point now mapProcessToClientStateRebalanceDTO is up to date
         populateNewStandbyAssignments(assignmentState);
+        // from this point now assignmentState.newAssignments is up to date too
     }
 
     // ugly but might work
@@ -576,6 +618,8 @@ public class HighAvailabilityAssignor implements TaskAssignor {
 
     // used to hold the data during the assignment
     static class AssignmentClientStateTask {
+        // TODO: not updateing consumerToTaskIds in mapping, might be wrong
+        // Check if need to change
         private final Map<String, Set<TaskId>> consumerToTaskIds;
         private Set<TaskId> taskIds;
 
