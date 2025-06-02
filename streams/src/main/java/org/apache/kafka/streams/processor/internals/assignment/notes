@@ -23,4 +23,6 @@ Will there be a problem if there is missing data as HAAClientState does not cont
 
 TODO: double check how ClientState should be updated and what needs to be updated
 
+create another branch where create interface for ClientState and HAAClientState
+
 
