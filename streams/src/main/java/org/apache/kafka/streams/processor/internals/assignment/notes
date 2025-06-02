@@ -18,3 +18,9 @@ want to populate ClientState map with mapProcessToClientStateRebalanceDTO
 
 Will there be a problem if there is missing data as HAAClientState does not contain all the information?
 
+
+
+
+TODO: double check how ClientState should be updated and what needs to be updated
+
+
