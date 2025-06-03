@@ -27,7 +27,6 @@ import org.apache.kafka.streams.processor.assignment.TaskAssignmentUtils;
 import org.apache.kafka.streams.processor.assignment.TaskAssignor;
 import org.apache.kafka.streams.processor.assignment.TaskAssignor.TaskAssignment;
 import org.apache.kafka.streams.processor.assignment.TaskInfo;
-import org.apache.kafka.streams.processor.assignment.assignors.StickyTaskAssignor;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Timeout;
@@ -57,15 +56,15 @@ public class CustomHighAvailabilityAssignorTest {
 
     @BeforeEach
     public void setUp() {
-        assignor = new StickyTaskAssignor();
+        assignor = new HighAvailabilityAssignor();
     }
 
     @Timeout(value = 3, unit = TimeUnit.MINUTES)
     @ParameterizedTest
     @ValueSource(strings = {
-            StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_NONE,
-            StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_MIN_TRAFFIC,
-            StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_BALANCE_SUBTOPOLOGY,
+        StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_NONE,
+        StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_MIN_TRAFFIC,
+        StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_BALANCE_SUBTOPOLOGY,
     })
     public void shouldAssignOneActiveTaskToEachProcessWhenTaskCountSameAsProcessCount(final String rackAwareStrategy) {
         final Map<ProcessId, KafkaStreamsState> streamStates = mkMap(
