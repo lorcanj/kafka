@@ -163,8 +163,8 @@ public class HighAvailabilityAssignor implements TaskAssignor {
 
         for (final var clientMap : clientStateMap.entrySet()) {
             final HighAvailabilityClientState currentAssignment = assignmentState.mapProcessToClientStateRebalanceDTO.get(clientMap.getKey());
-            currentAssignment.assignedActiveTasks.taskIds = clientMap.getValue().activeTasks();
-            currentAssignment.assignedStandbyTasks.taskIds = clientMap.getValue().standbyTasks();
+            currentAssignment.assignedActiveTasks.taskIds = new HashSet<>(clientMap.getValue().activeTasks());
+            currentAssignment.assignedStandbyTasks.taskIds = new HashSet<>(clientMap.getValue().standbyTasks());
 
             // want to update below
             // below is wrong as I'm updating the clientState and not the KafkaStreamsAssignment
