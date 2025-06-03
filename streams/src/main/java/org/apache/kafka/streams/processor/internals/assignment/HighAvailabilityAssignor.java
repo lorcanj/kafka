@@ -67,6 +67,7 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         resetAndUpdateDTOMapActiveTasks(assignmentState);
 
         // now create the clientStatesOld
+        // TODO: check if is correct
         final TreeMap<ProcessId, ClientState> clientStatesOLD = translateToLegacyClientStateMap(clients, assignmentState);
 
         // the below needs the old ClientStates, as I'm still using the old assignor
@@ -308,10 +309,9 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             assignmentState.mapProcessToClientStateRebalanceDTO.get(thing.getKey()).assignedStandbyTasks.taskIds.clear();
             assignmentState.mapProcessToClientStateRebalanceDTO.get(thing.getKey()).assignedStandbyTasks.setTaskIds(standbyTasks);
 
-            // TODO: need to fix this
+            // TODO: need to complete this
             ClientState clientState = clientStateMap.get(thing.getKey());
-            clientState.
-
+            standbyTasks.forEach(clientState::assignStandby);
         }
 
         for (var thing : assignmentState.mapProcessToClientStateRebalanceDTO.entrySet()) {
