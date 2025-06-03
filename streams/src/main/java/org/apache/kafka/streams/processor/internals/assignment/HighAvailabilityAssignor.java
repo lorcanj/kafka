@@ -174,7 +174,10 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             final Set<TaskId> activeAssignedTaskIds = clientMap.getValue().activeTasks();
             final Set<TaskId> standbyAssignedTaskIds = clientMap.getValue().standbyTasks();
 
-            assignmentState.newAssignments.clear();
+
+            assignmentState.clearAllAssignments();
+            // below is wrong b/c we don't want to clear the processIds
+            // assignmentState.newAssignments.clear();
 
             for (final var blah : activeAssignedTaskIds) {
                 assignmentState.finalizeAssignment(blah, clientMap.getKey(), KafkaStreamsAssignment.AssignedTask.Type.ACTIVE);
@@ -640,6 +643,13 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             ));
         }
 
+        private void clearAllAssignments() {
+            newAssignments.values().forEach(assignment ->
+                    assignment.tasks().forEach((assignedTaskId, task) ->
+                            assignment.removeTask(task)
+                    ));
+        }
+
         // TODO: might need to update this
         // need this to update mapProcessToClientStateRebalanceDTO
         // need the below to then create this from the other map
@@ -681,7 +691,8 @@ public class HighAvailabilityAssignor implements TaskAssignor {
                 for (final Map.Entry<ProcessId, HighAvailabilityClientState> clientEntry : clientStates.entrySet()) {
                     final ProcessId client = clientEntry.getKey();
                     // not sure if this should be true or false;
-                    // not sure if this is correct but it might be
+
+                    // below is wrong because
                     final long taskLag = applicationState.kafkaStreamsStates(false).get(client).lagFor(task);
                     // final long taskLag = clientEntry.getValue().lagFor(task);
                     if (activeRunning(taskLag) || unbounded(acceptableRecoveryLag) || acceptable(acceptableRecoveryLag, taskLag)) {
