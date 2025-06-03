@@ -46,7 +46,6 @@ import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static java.util.Collections.unmodifiableSet;
 import static org.apache.kafka.common.utils.Utils.diff;
 import static org.apache.kafka.streams.processor.assignment.KafkaStreamsAssignment.AssignedTask.Type.ACTIVE;
 import static org.apache.kafka.streams.processor.assignment.KafkaStreamsAssignment.AssignedTask.Type.STANDBY;
@@ -789,11 +788,11 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         }
 
         public Set<TaskId> activeTasks() {
-            return unmodifiableSet(assignedActiveTasks.taskIds());
+            return assignedActiveTasks.taskIds();
         }
 
         public Set<TaskId> standbyTasks() {
-            return unmodifiableSet(assignedStandbyTasks.taskIds());
+            return assignedStandbyTasks.taskIds();
         }
 
         public void assignActive(final TaskId task) {
