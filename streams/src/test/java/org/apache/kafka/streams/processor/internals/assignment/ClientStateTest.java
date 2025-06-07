@@ -27,6 +27,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 import static java.util.Arrays.asList;
 import static org.apache.kafka.common.utils.Utils.mkEntry;
@@ -541,7 +542,7 @@ public class ClientStateTest {
     @Test
     public void shouldReturnClientTags() {
         final Map<String, String> clientTags = mkMap(mkEntry("k1", "v1"));
-        assertEquals(clientTags, new ClientState(null, 0, clientTags).clientTags());
+        assertEquals(clientTags, new ClientState(null, 0, clientTags, new TreeMap<>()).clientTags());
     }
 
     @Test

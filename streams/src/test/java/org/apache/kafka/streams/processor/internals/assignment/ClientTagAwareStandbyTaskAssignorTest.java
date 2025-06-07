@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -838,7 +839,7 @@ public class ClientTagAwareStandbyTaskAssignorTest {
                                                              final int capacity,
                                                              final Map<String, String> clientTags,
                                                              final TaskId... tasks) {
-        final ClientState clientState = new ClientState(processId, capacity, clientTags);
+        final ClientState clientState = new ClientState(processId, capacity, clientTags, new TreeMap<>());
 
         Optional.ofNullable(tasks).ifPresent(t -> clientState.assignActiveTasks(asList(t)));
 

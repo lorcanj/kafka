@@ -29,11 +29,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.SortedMap;
@@ -83,7 +85,7 @@ public class HighAvailabilityAssignor implements TaskAssignor {
 
         // now create the clientStatesOld
         // TODO: check if is correct
-        final TreeMap<ProcessId, ClientState> clientStatesOLD = translateToLegacyClientStateMap(clients, assignmentState);
+        TreeMap<ProcessId, ClientState> clientStatesOLD = translateToLegacyClientStateMap(clients, assignmentState, applicationState);
 
         // the below needs the old ClientStates, as I'm still using the old assignor
         assignStandbyReplicaTasks(applicationState, assignmentState, statefulTasks, clients.values(), clientStatesOLD);
@@ -111,6 +113,9 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         // hot-standby replicas, so we just track it right here as metadata, rather
         // than add "warmup" assignments to ClientState, for example.
         final Map<ProcessId, Set<TaskId>> warmups = new TreeMap<>();
+
+        clientStatesOLD.clear();
+        clientStatesOLD = translateToLegacyClientStateMap(clients, assignmentState, applicationState);
 
         // Lorcan
         final int neededActiveTaskMovements = assignActiveTaskMovements(
@@ -161,6 +166,7 @@ public class HighAvailabilityAssignor implements TaskAssignor {
 
     private static void reorderDTOAndAssignmentState(final AssignmentState assignmentState, final Map<ProcessId, ClientState> clientStateMap) {
 
+        assignmentState.clearAllAssignments();
         for (final var clientMap : clientStateMap.entrySet()) {
             final HighAvailabilityClientState currentAssignment = assignmentState.mapProcessToClientStateRebalanceDTO.get(clientMap.getKey());
             currentAssignment.assignedActiveTasks.taskIds = new HashSet<>(clientMap.getValue().activeTasks());
@@ -175,7 +181,8 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             final Set<TaskId> standbyAssignedTaskIds = clientMap.getValue().standbyTasks();
 
 
-            assignmentState.clearAllAssignments();
+
+            // assignmentState.newAssignments.get()
             // below is wrong b/c we don't want to clear the processIds
             // assignmentState.newAssignments.clear();
 
@@ -217,24 +224,29 @@ public class HighAvailabilityAssignor implements TaskAssignor {
     // TODO: good first attempt
     private TreeMap<ProcessId, ClientState> translateToLegacyClientStateMap(
             final Map<ProcessId, KafkaStreamsState> newStates,
-            final AssignmentState assignmentState) {
+            final AssignmentState assignmentState,
+            final ApplicationState applicationState) {
 
         final TreeMap<ProcessId, ClientState> legacyClientStates = new TreeMap<>();
 
         for (final Map.Entry<ProcessId, KafkaStreamsState> entry : newStates.entrySet()) {
             final ProcessId processId = entry.getKey();
-            final KafkaStreamsState newState = entry.getValue(); // The NEW state object
+            // final KafkaStreamsState newState = entry.getValue(); // The NEW state object
 
-            final ClientState legacyClientState = new ClientState(processId, entry.getValue().numProcessingThreads());
+            final Map<TaskId, Long> lagToOffset = entry.getValue().statefulTasksToLagSums();
+
+            final ClientState legacyClientState = new ClientState(processId, entry.getValue().numProcessingThreads(), lagToOffset);
 
             // add previous active and standby tasks to the clientState
-            legacyClientState.addPreviousActiveTasks(newState.previousActiveTasks());
-            legacyClientState.addPreviousStandbyTasks(newState.previousStandbyTasks());
+            // legacyClientState.addPreviousActiveTasks(newState.previousActiveTasks());
+            // legacyClientState.addPreviousStandbyTasks(newState.previousStandbyTasks());
 
             // 5. Copy other fields (HostInfo, RackID) if legacy ClientState has them and legacy logic needs them.
             // legacyClientState.setHostInfo(newState.hostInfo());
             // newState.rackId().ifPresent(legacyClientState::setRackId); // Handle Optional if needed
+            // legacyClientState.computeTaskLags(null);
 
+            // setTaskLags(newState.taskLags());
             // 6. Put the populated legacy state into the map
             legacyClientStates.put(processId, legacyClientState);
         }
@@ -274,9 +286,10 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             // Lorcan
             // below is awful but necessary atm
             final ClientState currentClientState = clientStateMap.get(thing.processId());
-            for (final TaskId taskId : currentClientState.standbyTasks()) {
-                currentClientState.unassignStandby(taskId);
-            }
+            currentClientState.standbyTasks().clear();
+//            for (final TaskId taskId : currentClientState.standbyTasks()) {
+//                currentClientState.unassignStandby(taskId);
+//            }
 
             for (final TaskId taskId : t) {
                 currentClientState.assignStandby(taskId);
@@ -644,10 +657,17 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         }
 
         private void clearAllAssignments() {
-            newAssignments.values().forEach(assignment ->
-                    assignment.tasks().forEach((assignedTaskId, task) ->
-                            assignment.removeTask(task)
-                    ));
+            newAssignments.values().forEach(assignment -> {
+                    // Step 1: Collect the keys of all tasks to be removed into a new List.
+                    // We iterate over the keySet of the unmodifiable map. This is safe.
+                    // We create a new ArrayList to store the keys we want to remove.
+                final List<KafkaStreamsAssignment.AssignedTask> tasksToRemove = new ArrayList<>(assignment.tasks().values());
+
+                    // Step 2: Now that we are done iterating over the tasks map,
+                    // we can safely call the removal method for each task we collected.
+                    // We assume a method like `removeTaskById` exists on your Assignment class.
+                tasksToRemove.forEach(assignment::removeTask);
+            });
         }
 
         // TODO: might need to update this
@@ -830,6 +850,7 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             assignedStandbyTasks.taskIds().add(task);
         }
 
+        // Problem with unmodifiable sets again
         void unassignStandby(final TaskId task) {
             final Set<TaskId> taskIds = assignedStandbyTasks.taskIds();
             if (!taskIds.contains(task)) {

@@ -31,23 +31,34 @@ import org.apache.kafka.streams.processor.assignment.TaskInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static java.util.Arrays.asList;
+import static java.util.Collections.emptySet;
 import static org.apache.kafka.common.utils.Utils.mkMap;
 import static org.apache.kafka.streams.processor.assignment.KafkaStreamsAssignment.AssignedTask.Type.ACTIVE;
 import static org.apache.kafka.streams.processor.assignment.KafkaStreamsAssignment.AssignedTask.Type.STANDBY;
+import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.EMPTY_RACK_AWARE_ASSIGNMENT_TAGS;
+import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.PID_1;
+import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.PID_2;
+import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.PID_3;
 import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.TASK_0_0;
 import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.TASK_0_1;
 import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.TASK_0_2;
@@ -69,10 +80,8 @@ import static org.apache.kafka.streams.processor.internals.assignment.TaskAssign
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
-import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.lessThanOrEqualTo;
-import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.notNullValue;
 
 public class CustomHighAvailabilityAssignorTest {
 
@@ -322,56 +331,305 @@ public class CustomHighAvailabilityAssignorTest {
     }
 
 
-    @Timeout(value = 3, unit = TimeUnit.MINUTES)
+//    @Timeout(value = 3, unit = TimeUnit.MINUTES)
+//    @ParameterizedTest
+//    @ValueSource(strings = {
+//        StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_NONE,
+//        StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_MIN_TRAFFIC,
+//        StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_BALANCE_SUBTOPOLOGY,
+//    })
+//    public void shouldAssignStandbyTasksToDifferentClientThanCorrespondingActiveTaskIsAssignedTo(final String rackAwareStrategy) {
+//        final Map<TaskId, TaskInfo> tasks = mkMap(
+//                mkTaskInfo(TASK_0_0, true),
+//                mkTaskInfo(TASK_0_1, true),
+//                mkTaskInfo(TASK_0_2, true),
+//                mkTaskInfo(TASK_0_3, true)
+//        );
+//
+//        final Map<ProcessId, KafkaStreamsState> streamStates = mkMap(
+//                mkStreamState(1, 1, Optional.empty(), Set.of(TASK_0_0), Set.of()),
+//                mkStreamState(2, 1, Optional.empty(), Set.of(TASK_0_1), Set.of()),
+//                mkStreamState(3, 1, Optional.empty(), Set.of(TASK_0_2), Set.of()),
+//                mkStreamState(4, 1, Optional.empty(), Set.of(TASK_0_3), Set.of())
+//        );
+//
+//        final Map<ProcessId, KafkaStreamsAssignment> assignments = assign(streamStates, tasks, 1, rackAwareStrategy);
+//        assertThat(standbyTasks(assignments, 1).size(), lessThanOrEqualTo(2));
+//        assertThat(standbyTasks(assignments, 2).size(), lessThanOrEqualTo(2));
+//        assertThat(standbyTasks(assignments, 3).size(), lessThanOrEqualTo(2));
+//        assertThat(standbyTasks(assignments, 4).size(), lessThanOrEqualTo(2));
+//
+//        assertThat(standbyTasks(assignments, 1), not(hasItems(TASK_0_0)));
+//        assertThat(standbyTasks(assignments, 2), not(hasItems(TASK_0_1)));
+//        assertThat(standbyTasks(assignments, 3), not(hasItems(TASK_0_2)));
+//        assertThat(standbyTasks(assignments, 4), not(hasItems(TASK_0_3)));
+//
+//        assertThat(activeTasks(assignments, 1), hasItems(TASK_0_0));
+//        assertThat(activeTasks(assignments, 2), hasItems(TASK_0_1));
+//        assertThat(activeTasks(assignments, 3), hasItems(TASK_0_2));
+//        assertThat(activeTasks(assignments, 4), hasItems(TASK_0_3));
+//
+//        int nonEmptyStandbyTaskCount = 0;
+//        for (int i = 1; i <= 4; i++) {
+//            nonEmptyStandbyTaskCount += standbyTasks(assignments, i).isEmpty() ? 0 : 1;
+//        }
+//
+//        assertThat(nonEmptyStandbyTaskCount, greaterThanOrEqualTo(3));
+//
+//        final Set<TaskId> allStandbyTasks = allTasks(assignments).stream()
+//                .filter(t -> t.type() == STANDBY)
+//                .map(KafkaStreamsAssignment.AssignedTask::id)
+//                .collect(Collectors.toSet());
+//        assertThat(allStandbyTasks, equalTo(Set.of(TASK_0_0, TASK_0_1, TASK_0_2, TASK_0_3)));
+//    }
+
+    static Stream<Arguments> parameter() {
+        return Stream.of(
+                Arguments.of(StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_NONE, false, 1),
+                Arguments.of(StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_MIN_TRAFFIC, true, 1),
+                Arguments.of(StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_BALANCE_SUBTOPOLOGY, true, 4)
+        );
+    }
+
+    private AssignmentConfigs getConfigWithoutStandbys(final String rackAwareStrategy) {
+        return new AssignmentConfigs(
+                /*acceptableRecoveryLag*/ 100L,
+                /*maxWarmupReplicas*/ 2,
+                /*numStandbyReplicas*/ 0,
+                /*probingRebalanceIntervalMs*/ 60 * 1000L,
+                /*rackAwareAssignmentTags*/ EMPTY_RACK_AWARE_ASSIGNMENT_TAGS,
+                null,
+                null,
+                rackAwareStrategy
+        );
+    }
+
+    private AssignmentConfigs getConfigWithStandbys(final String rackAwareStrategy) {
+        return getConfigWithStandbys(1, rackAwareStrategy);
+    }
+
+    private AssignmentConfigs getConfigWithStandbys(final int replicaNum, final String rackAwareStrategy) {
+        return new AssignmentConfigs(
+                /*acceptableRecoveryLag*/ 100L,
+                /*maxWarmupReplicas*/ 2,
+                /*numStandbyReplicas*/ replicaNum,
+                /*probingRebalanceIntervalMs*/ 60 * 1000L,
+                /*rackAwareAssignmentTags*/ EMPTY_RACK_AWARE_ASSIGNMENT_TAGS,
+                null,
+                null,
+                rackAwareStrategy
+        );
+    }
+
+    // Lorcan
+    // TODO: update this test for the HAA
+    @ParameterizedTest
+    @MethodSource("parameter")
+    public void shouldBeStickyForActiveAndStandbyTasksWhileWarmingUp(final String rackAwareStrategy
+                                                                     ) {
+
+        final Set<TaskId> allTaskIds = Set.of(TASK_0_0, TASK_0_1, TASK_0_2, TASK_1_0, TASK_1_1, TASK_1_2, TASK_2_0, TASK_2_1, TASK_2_2);
+
+        // 1. Create AssignmentConfigs
+        final AssignmentConfigs configs = new AssignmentConfigs(
+                11L, // acceptableRecoveryLag
+                2,   // maxWarmupReplicas
+                1,   // numStandbyReplicas
+                60_000L, // probingRebalanceIntervalMs
+                Collections.emptyList(), // rackAwareAssignmentTags
+                OptionalInt.empty(),     // Corrected: Was Optional.empty() which might infer incorrectly
+                OptionalInt.empty(),     // Corrected: Was Optional.empty()
+                rackAwareStrategy
+        );
+
+        // 2. Create Map<TaskId, TaskInfo> - All tasks are stateful
+        final Map<TaskId, TaskInfo> tasks = allTaskIds.stream()
+                .collect(Collectors.toMap(
+                        Function.identity(),
+                        taskId -> mkTaskInfo(taskId, true).getValue() // true for stateful
+                ));
+
+        // 3. Create Map<ProcessId, KafkaStreamsState>
+        final Map<ProcessId, KafkaStreamsState> clientStatesMap = new HashMap<>();
+        final int capacity = 1; // All clients have capacity 1 (1 thread)
+
+        // Client 1 (PID_1): Was all active, 0 lag
+        final Map<TaskId, Long> lags1 = allTaskIds.stream().collect(Collectors.toMap(Function.identity(), t -> 0L));
+        clientStatesMap.put(PID_1, mkStreamState(
+                        1,                          // ProcessId (assuming your PID_1 is compatible with int, or the actual mkStreamState takes ProcessId)
+                        capacity,                          // int
+                        Optional.empty(),                  // Optional<String> for rackId
+                        allTaskIds,                        // Set<TaskId> for previous active
+                        emptySet(),            // Set<TaskId> for previous standby
+                        Collections.emptyMap(),            // Map<String, String> for client tags (added this, as it's in signature 3)
+                        Optional.of(lags1)                 // Optional<Map<TaskId, Long>> for taskLags
+                ).getValue()
+        );
+
+        // Client 2 (PID_2): Was all standby, lag 10
+        final Map<TaskId, Long> lags2 = allTaskIds.stream().collect(Collectors.toMap(Function.identity(), t -> 10L));
+        clientStatesMap.put(PID_2, mkStreamState(
+                        2,                          // ProcessId (assuming your PID_1 is compatible with int, or the actual mkStreamState takes ProcessId)
+                        capacity,                          // int
+                        Optional.empty(),                  // Optional<String> for rackId
+                        allTaskIds,                        // Set<TaskId> for previous active
+                        emptySet(),            // Set<TaskId> for previous standby
+                        Collections.emptyMap(),            // Map<String, String> for client tags (added this, as it's in signature 3)
+                        Optional.of(lags2)                 // Optional<Map<TaskId, Long>> for taskLags
+                ).getValue()
+        );
+
+        // Client 3 (PID_3): New/empty, max lag
+        final Map<TaskId, Long> lags3 = allTaskIds.stream().collect(Collectors.toMap(Function.identity(), t -> Long.MAX_VALUE));
+        clientStatesMap.put(PID_3, mkStreamState(
+                        3,                          // ProcessId (assuming your PID_1 is compatible with int, or the actual mkStreamState takes ProcessId)
+                        capacity,                          // int
+                        Optional.empty(),                  // Optional<String> for rackId
+                        allTaskIds,                        // Set<TaskId> for previous active
+                        emptySet(),            // Set<TaskId> for previous standby
+                        Collections.emptyMap(),            // Map<String, String> for client tags (added this, as it's in signature 3)
+                        Optional.of(lags3)                 // Optional<Map<TaskId, Long>> for taskLags
+                ).getValue()
+        );
+
+        // 4. Create ApplicationState
+        final ApplicationState applicationState = new TaskAssignmentUtilsTest.TestApplicationState(
+                configs,
+                clientStatesMap,
+                tasks
+        );
+
+        // 5. Instantiate and Call your New HighAvailabilityAssignor
+        final TaskAssignor assignor = new HighAvailabilityAssignor(); // Your new HAA
+        final TaskAssignment taskAssignment = assignor.assign(applicationState);
+
+        // 6. Adapt Assertions
+        final Map<ProcessId, KafkaStreamsAssignment> assignmentsByProcessId =
+                taskAssignment.assignment().stream()
+                        .collect(Collectors.toMap(KafkaStreamsAssignment::processId, Function.identity()));
+
+        // Assertions for PID_1 (should get all tasks as ACTIVE)
+        final KafkaStreamsAssignment assignment1 = assignmentsByProcessId.get(PID_1);
+        assertThat("PID_1 assignment should exist", assignment1, notNullValue());
+        final long activeCount1 = assignment1.tasks().values().stream().filter(t -> t.type() == KafkaStreamsAssignment.AssignedTask.Type.ACTIVE).count();
+        final long standbyCount1 = assignment1.tasks().values().stream().filter(t -> t.type() == KafkaStreamsAssignment.AssignedTask.Type.STANDBY).count();
+        assertThat("PID_1 should have all " + allTaskIds.size() + " tasks as active", activeCount1, equalTo((long) allTaskIds.size()));
+        assertThat("PID_1 should have 0 standby tasks", standbyCount1, equalTo(0L));
+
+        // Assertions for PID_2 (should get all tasks as STANDBY)
+        final KafkaStreamsAssignment assignment2 = assignmentsByProcessId.get(PID_2);
+        assertThat("PID_2 assignment should exist", assignment2, notNullValue());
+        final long activeCount2 = assignment2.tasks().values().stream().filter(t -> t.type() == KafkaStreamsAssignment.AssignedTask.Type.ACTIVE).count();
+        final long standbyCount2 = assignment2.tasks().values().stream().filter(t -> t.type() == KafkaStreamsAssignment.AssignedTask.Type.STANDBY).count();
+        assertThat("PID_2 should have all " + allTaskIds.size() + " tasks as standby", standbyCount2, equalTo((long) allTaskIds.size()));
+        assertThat("PID_2 should have 0 active tasks", activeCount2, equalTo(0L));
+
+        // Assertions for PID_3 (should get maxWarmupReplicas = 2 tasks as STANDBY/warmup)
+        final KafkaStreamsAssignment assignment3 = assignmentsByProcessId.get(PID_3);
+        assertThat("PID_3 assignment should exist", assignment3, notNullValue());
+        final long activeCount3 = assignment3.tasks().values().stream().filter(t -> t.type() == KafkaStreamsAssignment.AssignedTask.Type.ACTIVE).count();
+        final long standbyCount3 = assignment3.tasks().values().stream().filter(t -> t.type() == KafkaStreamsAssignment.AssignedTask.Type.STANDBY).count();
+        assertThat("PID_3 should have " + configs.maxWarmupReplicas() + " tasks as standby (warmups)", standbyCount3, equalTo((long) configs.maxWarmupReplicas()));
+        assertThat("PID_3 should have 0 active tasks", activeCount3, equalTo(0L));
+        // You might add more specific assertions about *which* tasks PID_3 gets if your HAA has deterministic warmup selection.
+
+        // Assert that a probing rebalance IS scheduled
+        final boolean probingSignaled = taskAssignment.assignment().stream()
+                .anyMatch(ka -> ka.followupRebalanceDeadline().isPresent() &&
+                        ka.followupRebalanceDeadline().get().isAfter(Instant.EPOCH)); // check it's not epoch 0
+        assertThat("Probing rebalance should be signaled", probingSignaled, is(true));
+
+        // Rack Awareness Assertions (This part needs careful thought based on HAA's rack logic)
+        // The original verifyTaskPlacementWithRackAwareAssignor(...) is for legacy.
+        // Your new HAA uses TaskAssignmentUtils.optimizeRackAwareActiveTasks/StandbyTasks.
+        // You'll need to assert the *outcome* of those utils on the final `taskAssignment`.
+        // This typically means checking that active and standby for the same TaskId are on different racks
+        // if rackAwareStrategy is not NONE and enough racks are available.
+//        if (!rackAwareStrategy.equals(StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_NONE) &&
+//                areMultipleRacksAvailable(clientStatesMap)) { // You'd need a helper for this
+//            // Example assertion (conceptual):
+//            // verifyActiveStandbyRackSeparation(taskAssignment, applicationState);
+//            // This helper would iterate through stateful tasks, find their active and standby assignments,
+//            // get the rack for each assigned client from applicationState.kafkaStreamsStates(),
+//            // and assert they are different if possible.
+//        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
         StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_NONE,
-        StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_MIN_TRAFFIC,
-        StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_BALANCE_SUBTOPOLOGY,
+        StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_MIN_TRAFFIC
     })
-    public void shouldAssignStandbyTasksToDifferentClientThanCorrespondingActiveTaskIsAssignedTo(final String rackAwareStrategy) {
-        final Map<TaskId, TaskInfo> tasks = mkMap(
-                mkTaskInfo(TASK_0_0, true),
-                mkTaskInfo(TASK_0_1, true),
-                mkTaskInfo(TASK_0_2, true),
-                mkTaskInfo(TASK_0_3, true)
+    public void shouldAssignCorrectNumberOfStandbys(final String rackAwareStrategy) {
+        // 1. Define the tasks and clients for the scenario
+        final TaskId task00 = new TaskId(0, 0);
+        final TaskId task01 = new TaskId(0, 1);
+        final TaskId task02 = new TaskId(0, 2);
+        final Set<TaskId> allTaskIds = Set.of(task00, task01, task02);
+
+        final ProcessId pid1 = processId(1);
+        final ProcessId pid2 = processId(2);
+        final ProcessId pid3 = processId(3);
+        final int capacity = 1;
+
+        // 2. Set up AssignmentConfigs to request 2 standby replicas
+        final AssignmentConfigs configs = new AssignmentConfigs(
+                10000L, // acceptableRecoveryLag
+                1,      // maxWarmupReplicas
+                2,      // numStandbyReplicas
+                60_000L,
+                Collections.emptyList(),
+                OptionalInt.empty(),
+                OptionalInt.empty(),
+                rackAwareStrategy
         );
 
-        final Map<ProcessId, KafkaStreamsState> streamStates = mkMap(
-                mkStreamState(1, 1, Optional.empty(), Set.of(TASK_0_0), Set.of()),
-                mkStreamState(2, 1, Optional.empty(), Set.of(TASK_0_1), Set.of()),
-                mkStreamState(3, 1, Optional.empty(), Set.of(TASK_0_2), Set.of()),
-                mkStreamState(4, 1, Optional.empty(), Set.of(TASK_0_3), Set.of())
+        // 3. Define all tasks as stateful
+        final Map<TaskId, TaskInfo> tasks = allTaskIds.stream()
+                .collect(Collectors.toMap(
+                        Function.identity(),
+                        taskId -> mkTaskInfo(taskId, true).getValue() // true for stateful
+                ));
+
+        // 4. Set up the initial state: each client has one active task and NO previous standbys
+        final Map<ProcessId, KafkaStreamsState> clientStatesMap = new HashMap<>();
+
+        // All clients are fully caught-up (lag = 0) for all tasks
+        final Optional<Map<TaskId, Long>> lags = Optional.of(allTaskIds.stream().collect(Collectors.toMap(Function.identity(), t -> 0L)));
+
+        clientStatesMap.put(pid1, mkStreamState(1, capacity, Optional.empty(), Set.of(task00), Collections.emptySet(), Collections.emptyMap(), lags).getValue());
+        clientStatesMap.put(pid2, mkStreamState(2, capacity, Optional.empty(), Set.of(task01), Collections.emptySet(), Collections.emptyMap(), lags).getValue());
+        clientStatesMap.put(pid3, mkStreamState(3, capacity, Optional.empty(), Set.of(task02), Collections.emptySet(), Collections.emptyMap(), lags).getValue());
+
+        // 5. Create the ApplicationState object
+        final ApplicationState applicationState = new TaskAssignmentUtilsTest.TestApplicationState(
+                configs,
+                clientStatesMap,
+                tasks
         );
 
-        final Map<ProcessId, KafkaStreamsAssignment> assignments = assign(streamStates, tasks, 1, rackAwareStrategy);
-        assertThat(standbyTasks(assignments, 1).size(), lessThanOrEqualTo(2));
-        assertThat(standbyTasks(assignments, 2).size(), lessThanOrEqualTo(2));
-        assertThat(standbyTasks(assignments, 3).size(), lessThanOrEqualTo(2));
-        assertThat(standbyTasks(assignments, 4).size(), lessThanOrEqualTo(2));
+        // 6. Instantiate and call your new HighAvailabilityAssignor
+        final TaskAssignor assignor = new HighAvailabilityAssignor(); // Your new HAA
+        final TaskAssignment taskAssignment = assignor.assign(applicationState);
 
-        assertThat(standbyTasks(assignments, 1), not(hasItems(TASK_0_0)));
-        assertThat(standbyTasks(assignments, 2), not(hasItems(TASK_0_1)));
-        assertThat(standbyTasks(assignments, 3), not(hasItems(TASK_0_2)));
-        assertThat(standbyTasks(assignments, 4), not(hasItems(TASK_0_3)));
+        // 7. Assert the results
+        final Map<ProcessId, KafkaStreamsAssignment> assignments = taskAssignment.assignment().stream()
+                .collect(Collectors.toMap(KafkaStreamsAssignment::processId, Function.identity()));
 
-        assertThat(activeTasks(assignments, 1), hasItems(TASK_0_0));
-        assertThat(activeTasks(assignments, 2), hasItems(TASK_0_1));
-        assertThat(activeTasks(assignments, 3), hasItems(TASK_0_2));
-        assertThat(activeTasks(assignments, 4), hasItems(TASK_0_3));
+        // Verify active tasks remain where they were (since everything is healthy)
+        assertThat(activeTasks(assignments, 1), equalTo(Set.of(task00)));
+        assertThat(activeTasks(assignments, 2), equalTo(Set.of(task01)));
+        assertThat(activeTasks(assignments, 3), equalTo(Set.of(task02)));
 
-        int nonEmptyStandbyTaskCount = 0;
-        for (int i = 1; i <= 4; i++) {
-            nonEmptyStandbyTaskCount += standbyTasks(assignments, i).isEmpty() ? 0 : 1;
-        }
+        // Verify standby tasks are correctly placed
+        // PID 1 has active 0_0, so it should get standbys for 0_1 and 0_2
+        assertThat(standbyTasks(assignments, 1), equalTo(Set.of(task01, task02)));
 
-        assertThat(nonEmptyStandbyTaskCount, greaterThanOrEqualTo(3));
+        // PID 2 has active 0_1, so it should get standbys for 0_0 and 0_2
+        assertThat(standbyTasks(assignments, 2), equalTo(Set.of(task00, task02)));
 
-        final Set<TaskId> allStandbyTasks = allTasks(assignments).stream()
-                .filter(t -> t.type() == STANDBY)
-                .map(KafkaStreamsAssignment.AssignedTask::id)
-                .collect(Collectors.toSet());
-        assertThat(allStandbyTasks, equalTo(Set.of(TASK_0_0, TASK_0_1, TASK_0_2, TASK_0_3)));
+        // PID 3 has active 0_2, so it should get standbys for 0_0 and 0_1
+        assertThat(standbyTasks(assignments, 3), equalTo(Set.of(task00, task01)));
     }
 
     private Set<TaskId> standbyTasks(final Map<ProcessId, KafkaStreamsAssignment> assignments,

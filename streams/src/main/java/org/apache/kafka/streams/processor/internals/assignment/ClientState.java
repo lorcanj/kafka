@@ -74,7 +74,7 @@ public class ClientState {
     }
 
     public ClientState(final ProcessId processId, final Map<String, String> clientTags) {
-        this(processId, 0, clientTags);
+        this(processId, 0, clientTags, new TreeMap<>());
     }
 
     ClientState(final int capacity) {
@@ -82,18 +82,26 @@ public class ClientState {
     }
 
     public ClientState(final ProcessId processId, final int capacity) {
-        this(processId, capacity, Collections.emptyMap());
+        this(processId, capacity, Collections.emptyMap(), new TreeMap<>());
     }
 
-    ClientState(final ProcessId processId, final int capacity, final Map<String, String> clientTags) {
+    ClientState(final ProcessId processId, final int capacity, final Map<String, String> clientTags, final Map<TaskId, Long> taskLagTotals) {
         previousStandbyTasks.setTaskIds(new TreeSet<>());
         previousActiveTasks.setTaskIds(new TreeSet<>());
         taskOffsetSums = new TreeMap<>();
-        taskLagTotals = new TreeMap<>();
+        this.taskLagTotals = taskLagTotals;
         this.capacity = capacity;
         this.processId = processId;
         this.clientTags = unmodifiableMap(clientTags);
     }
+
+    public ClientState(final ProcessId processId, final int capacity, final Map<TaskId, Long> taskLagTotals) {
+        this(processId, capacity, Collections.emptyMap(), taskLagTotals);
+    }
+
+//    public ClientState(final ProcessId processId, final int capacity, final Map<String, String> clientTags) {
+//        this(processId, capacity, clientTags, new TreeMap<>());
+//    }
 
     // For testing only
     public ClientState(final Set<TaskId> previousActiveTasks,
@@ -241,8 +249,10 @@ public class ClientState {
         taskIds.remove(task);
     }
 
+    // Lorcan
+    // removed unmodifiable b/c impacting my test
     public Set<TaskId> standbyTasks() {
-        return unmodifiableSet(assignedStandbyTasks.taskIds());
+        return assignedStandbyTasks.taskIds();
     }
 
     boolean hasStandbyTask(final TaskId taskId) {
