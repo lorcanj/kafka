@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -233,9 +234,22 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             final ProcessId processId = entry.getKey();
             // final KafkaStreamsState newState = entry.getValue(); // The NEW state object
 
-            final Map<TaskId, Long> lagToOffset = entry.getValue().statefulTasksToLagSums();
+            // Lorcan
+            // not the nicest
+            Map<TaskId, Long> lagTotals = Collections.emptyMap();
 
-            final ClientState legacyClientState = new ClientState(processId, entry.getValue().numProcessingThreads(), lagToOffset);
+            // --- Start of the fix ---
+            try {
+                // Try to get the lag information
+                lagTotals = entry.getValue().statefulTasksToLagSums();
+            } catch (final UnsupportedOperationException e) {
+                // This is an expected exception for stateless topologies where lag is not computed.
+                // We can log it at a DEBUG level and proceed with an empty map.
+                log.debug("Caught expected exception from {} while getting lag sums, likely due to a stateless topology: {}",
+                        processId, e.getMessage());
+            }
+
+            final ClientState legacyClientState = new ClientState(processId, entry.getValue().numProcessingThreads(), lagTotals);
 
             // add previous active and standby tasks to the clientState
             // legacyClientState.addPreviousActiveTasks(newState.previousActiveTasks());
