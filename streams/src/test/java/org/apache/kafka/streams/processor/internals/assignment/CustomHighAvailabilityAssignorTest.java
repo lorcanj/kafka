@@ -425,8 +425,7 @@ public class CustomHighAvailabilityAssignorTest {
     // TODO: update this test for the HAA
     @ParameterizedTest
     @MethodSource("parameter")
-    public void shouldBeStickyForActiveAndStandbyTasksWhileWarmingUp(final String rackAwareStrategy
-                                                                     ) {
+    public void shouldBeStickyForActiveAndStandbyTasksWhileWarmingUp(final String rackAwareStrategy) {
 
         final Set<TaskId> allTaskIds = Set.of(TASK_0_0, TASK_0_1, TASK_0_2, TASK_1_0, TASK_1_1, TASK_1_2, TASK_2_0, TASK_2_1, TASK_2_2);
 
@@ -538,21 +537,6 @@ public class CustomHighAvailabilityAssignorTest {
                 .anyMatch(ka -> ka.followupRebalanceDeadline().isPresent() &&
                         ka.followupRebalanceDeadline().get().isAfter(Instant.EPOCH)); // check it's not epoch 0
         assertThat("Probing rebalance should be signaled", probingSignaled, is(true));
-
-        // Rack Awareness Assertions (This part needs careful thought based on HAA's rack logic)
-        // The original verifyTaskPlacementWithRackAwareAssignor(...) is for legacy.
-        // Your new HAA uses TaskAssignmentUtils.optimizeRackAwareActiveTasks/StandbyTasks.
-        // You'll need to assert the *outcome* of those utils on the final `taskAssignment`.
-        // This typically means checking that active and standby for the same TaskId are on different racks
-        // if rackAwareStrategy is not NONE and enough racks are available.
-//        if (!rackAwareStrategy.equals(StreamsConfig.RACK_AWARE_ASSIGNMENT_STRATEGY_NONE) &&
-//                areMultipleRacksAvailable(clientStatesMap)) { // You'd need a helper for this
-//            // Example assertion (conceptual):
-//            // verifyActiveStandbyRackSeparation(taskAssignment, applicationState);
-//            // This helper would iterate through stateful tasks, find their active and standby assignments,
-//            // get the rack for each assigned client from applicationState.kafkaStreamsStates(),
-//            // and assert they are different if possible.
-//        }
     }
 
     @ParameterizedTest
