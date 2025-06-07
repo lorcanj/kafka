@@ -234,7 +234,7 @@ public class HighAvailabilityAssignor implements TaskAssignor {
 
         for (final Map.Entry<ProcessId, KafkaStreamsState> entry : newStates.entrySet()) {
             final ProcessId processId = entry.getKey();
-            // final KafkaStreamsState newState = entry.getValue(); // The NEW state object
+            final KafkaStreamsState newState = entry.getValue(); // The NEW state object
 
             // Lorcan
             // not the nicest
@@ -254,21 +254,14 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             final ClientState legacyClientState = new ClientState(processId, entry.getValue().numProcessingThreads(), lagTotals);
 
             // add previous active and standby tasks to the clientState
-            // legacyClientState.addPreviousActiveTasks(newState.previousActiveTasks());
-            // legacyClientState.addPreviousStandbyTasks(newState.previousStandbyTasks());
-
-            // 5. Copy other fields (HostInfo, RackID) if legacy ClientState has them and legacy logic needs them.
-            // legacyClientState.setHostInfo(newState.hostInfo());
-            // newState.rackId().ifPresent(legacyClientState::setRackId); // Handle Optional if needed
-            // legacyClientState.computeTaskLags(null);
-
-            // setTaskLags(newState.taskLags());
-            // 6. Put the populated legacy state into the map
+            legacyClientState.addPreviousActiveTasks(newState.previousActiveTasks());
+            legacyClientState.addPreviousStandbyTasks(newState.previousStandbyTasks());
             legacyClientStates.put(processId, legacyClientState);
         }
 
         // assign active and standby tasks to correctly populate the ClientState map
         // this is super ugly and quite expensive to do
+
         for (final var thing : assignmentState.mapProcessToClientStateRebalanceDTO.entrySet()) {
             final ClientState clientStateToUpdate = legacyClientStates.get(thing.getKey());
             if (clientStateToUpdate != null) {
@@ -727,7 +720,6 @@ public class HighAvailabilityAssignor implements TaskAssignor {
                 for (final Map.Entry<ProcessId, HighAvailabilityClientState> clientEntry : clientStates.entrySet()) {
                     final ProcessId client = clientEntry.getKey();
                     // not sure if this should be true or false;
-
                     // below is wrong because
                     final long taskLag = applicationState.kafkaStreamsStates(false).get(client).lagFor(task);
                     // final long taskLag = clientEntry.getValue().lagFor(task);

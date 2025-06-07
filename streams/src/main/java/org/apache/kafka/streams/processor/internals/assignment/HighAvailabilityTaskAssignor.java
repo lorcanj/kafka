@@ -84,7 +84,8 @@ public class HighAvailabilityTaskAssignor implements LegacyTaskAssignor {
         // hot-standby replicas, so we just track it right here as metadata, rather
         // than add "warmup" assignments to ClientState, for example.
         final Map<ProcessId, Set<TaskId>> warmups = new TreeMap<>();
-
+        // Lorcan
+        // TODO: it should be 5 at this point
         final int neededActiveTaskMovements = assignActiveTaskMovements(
             tasksToCaughtUpClients,
             tasksToClientByLag,
@@ -92,7 +93,7 @@ public class HighAvailabilityTaskAssignor implements LegacyTaskAssignor {
             warmups,
             remainingWarmupReplicas
         );
-
+        // for PID_1 assignedStandbyTasks should be 4, is that is what's missing?
         final int neededStandbyTaskMovements = assignStandbyTaskMovements(
             tasksToCaughtUpClients,
             tasksToClientByLag,
