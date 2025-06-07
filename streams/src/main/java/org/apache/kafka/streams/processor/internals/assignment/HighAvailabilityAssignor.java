@@ -128,6 +128,8 @@ public class HighAvailabilityAssignor implements TaskAssignor {
                 remainingWarmupReplicas
         );
 
+        // Lorcan
+        // TODO: wrong again with potentially stale data
         final int neededStandbyTaskMovements = assignStandbyTaskMovements(
                 tasksToCaughtUpClients,
                 tasksToClientByLag,
