@@ -29,7 +29,10 @@ import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.StreamsConfig.InternalConfig;
 import org.apache.kafka.streams.processor.TaskId;
+import org.apache.kafka.streams.processor.assignment.ApplicationState;
 import org.apache.kafka.streams.processor.assignment.AssignmentConfigs;
+import org.apache.kafka.streams.processor.assignment.KafkaStreamsAssignment;
+import org.apache.kafka.streams.processor.assignment.KafkaStreamsState;
 import org.apache.kafka.streams.processor.assignment.ProcessId;
 import org.apache.kafka.streams.processor.internals.InternalTopicManager;
 import org.apache.kafka.streams.processor.internals.Task;
@@ -507,7 +510,19 @@ public final class AssignmentTestUtils {
 
         return new TaskSkewReport(maxTaskSkew, skewedSubtopologies, subtopologyToClientsWithPartition);
     }
-    // will want to update this, check what Sticky does
+
+    static Matcher<ClientState> hasAssignedTasks(final int taskCount) {
+        return hasProperty("assignedTasks", ClientState::assignedTaskCount, taskCount);
+    }
+
+    static Matcher<ClientState> hasActiveTasks(final int taskCount) {
+        return hasProperty("activeTasks", ClientState::activeTaskCount, taskCount);
+    }
+
+    static Matcher<ClientState> hasStandbyTasks(final int taskCount) {
+        return hasProperty("standbyTasks", ClientState::standbyTaskCount, taskCount);
+    }
+
     static <V> Matcher<ClientState> hasProperty(final String propertyName,
                                                 final Function<ClientState, V> propertyExtractor,
                                                 final V propertyValue) {
@@ -951,6 +966,63 @@ public final class AssignmentTestUtils {
             }
         }
     }
+
+    // Lorcan
+    static void verifyStandbySatisfyRackReplicaKafka(
+            final ApplicationState applicationState,
+            final Set<TaskId> taskIds,
+            final Map<ProcessId, KafkaStreamsAssignment> kafkaStreamsAssignmentMap,
+            final Integer replica,
+            final boolean relaxRackCheck,
+            final Map<ProcessId, Integer> standbyTaskCount
+    ) {
+        final Map<ProcessId, String> racksForProcess = new HashMap<>();
+        for (final KafkaStreamsState kafkaStreamsState : applicationState.kafkaStreamsStates(false).values()) {
+            kafkaStreamsState.rackId().ifPresent(rack -> racksForProcess.put(kafkaStreamsState.processId(), rack));
+        }
+        if (standbyTaskCount != null) {
+            for (final Entry<ProcessId, KafkaStreamsAssignment> entry : kafkaStreamsAssignmentMap.entrySet()) {
+                final int expected = standbyTaskCount.get(entry.getKey());
+                final int actual = (int) entry.getValue().tasks().values().stream().filter(x -> x.type() == KafkaStreamsAssignment.AssignedTask.Type.STANDBY).count();
+                assertEquals(expected, actual, "StandbyTaskCount for " + entry.getKey() + " doesn't match");
+            }
+        }
+        for (final TaskId taskId : taskIds) {
+            int activeCount = 0;
+            int standbyCount = 0;
+            final Map<String, ProcessId> racks = new HashMap<>();
+            for (final Map.Entry<ProcessId, KafkaStreamsAssignment> entry : kafkaStreamsAssignmentMap.entrySet()) {
+                final ProcessId processId = entry.getKey();
+                final KafkaStreamsAssignment kafkaStreamsAssignment = entry.getValue();
+
+                if (!relaxRackCheck && kafkaStreamsAssignment.tasks().containsKey(taskId)) {
+                    final String rack = racksForProcess.get(processId);
+                    assertThat("Task " + taskId + " appears in both " + processId + " and " + racks.get(rack), racks.keySet(), not(hasItems(rack)));
+                    racks.put(rack, processId);
+                }
+
+                boolean hasActive = false;
+                if (kafkaStreamsAssignment.tasks().entrySet().stream().filter(x -> x.getValue().type() == KafkaStreamsAssignment.AssignedTask.Type.ACTIVE).map(Entry::getKey).collect(Collectors.toSet()).contains(taskId)) {
+                    activeCount++;
+                    hasActive = true;
+                }
+
+                boolean hasStandby = false;
+                if (kafkaStreamsAssignment.tasks().entrySet().stream().filter(x -> x.getValue().type() == KafkaStreamsAssignment.AssignedTask.Type.STANDBY).map(Entry::getKey).collect(Collectors.toSet()).contains(taskId)) {
+                    standbyCount++;
+                    hasStandby = true;
+                }
+
+                assertFalse(hasActive && hasStandby, kafkaStreamsAssignment + " has both active and standby task " + taskId);
+            }
+
+            assertEquals(1, activeCount, "Task " + taskId + " should have 1 active task");
+            if (replica != null) {
+                assertEquals(replica.intValue(), standbyCount, "Task " + taskId + " has wrong replica count");
+            }
+        }
+    }
+
 
     static Map<ProcessId, Integer> clientTaskCount(final Map<ProcessId, ClientState> clientStateMap,
         final Function<ClientState, Integer> taskFunc) {

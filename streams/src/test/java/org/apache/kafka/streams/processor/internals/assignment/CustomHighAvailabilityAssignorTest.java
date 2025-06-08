@@ -74,6 +74,7 @@ import static org.apache.kafka.streams.processor.internals.assignment.Assignment
 import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.TASK_3_0;
 import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.TASK_3_1;
 import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.TASK_3_2;
+import static org.apache.kafka.streams.processor.internals.assignment.AssignmentTestUtils.verifyStandbySatisfyRackReplicaKafka;
 import static org.apache.kafka.streams.processor.internals.assignment.TaskAssignmentUtilsTest.mkStreamState;
 import static org.apache.kafka.streams.processor.internals.assignment.TaskAssignmentUtilsTest.mkTaskInfo;
 import static org.apache.kafka.streams.processor.internals.assignment.TaskAssignmentUtilsTest.processId;
@@ -459,7 +460,6 @@ public class CustomHighAvailabilityAssignorTest {
         assertThat("PID_1 assignment should exist", assignment1, notNullValue());
         assertThat(assignment1.tasks().size(), is(allTaskIds.size()));
 
-
         final KafkaStreamsAssignment assignment2 = assignmentsByProcessId.get(PID_2);
         assertThat("PID_2 assignment should exist", assignment2, notNullValue());
         assertThat(assignment2.tasks().size(), is(allTaskIds.size()));
@@ -473,6 +473,8 @@ public class CustomHighAvailabilityAssignorTest {
                 .anyMatch(ka -> ka.followupRebalanceDeadline().isPresent() &&
                         ka.followupRebalanceDeadline().get().equals(Instant.ofEpochMilli(0)));
         assertThat("Probing rebalance should be signaled", probingSignaled, is(true));
+
+        verifyStandbySatisfyRackReplicaKafka(applicationState, allTaskIds, assignmentsByProcessId, null, true, null);
     }
 
     // update  below

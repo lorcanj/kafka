@@ -63,20 +63,15 @@ public class HighAvailabilityAssignor implements TaskAssignor {
 
     @Override
     public TaskAssignment assign(final ApplicationState applicationState) {
-        // KafkaStreamsState - immutable input
-        // therefore need another class to use to hold the current data during re-balance
-        // i.e. HighAvailabilityClientState
         final Map<ProcessId, KafkaStreamsState> clients = applicationState.kafkaStreamsStates(false);
-        // Lorcan
-        // this can probably just be done at the end
-        final HighAvailabilityAssignor.AssignmentState assignmentState = new HighAvailabilityAssignor.AssignmentState(applicationState, clients);
+        final HighAvailabilityAssignor.AssignmentState assignmentState = new HighAvailabilityAssignor.AssignmentState(clients);
         // HighAvailabilityClientState need these created for each ClientState
         final SortedSet<TaskId> statefulTasks = applicationState.allTasks().entrySet().stream().filter(entry -> entry.getValue().isStateful())
                 .map(Map.Entry::getKey).collect(Collectors.toCollection(TreeSet::new));
 
 
         // assignStateful tasks updates newAssignments
-        assignActiveStatefulTasks(applicationState, assignmentState, statefulTasks, clients.values());
+        assignActiveStatefulTasks(assignmentState, statefulTasks, clients.values());
         optimiseActiveStatefulTasks(applicationState, assignmentState);
 
 
@@ -86,7 +81,7 @@ public class HighAvailabilityAssignor implements TaskAssignor {
 
         // now create the clientStatesOld
         // TODO: check if is correct
-        TreeMap<ProcessId, ClientState> clientStatesOLD = translateToLegacyClientStateMap(clients, assignmentState, applicationState);
+        TreeMap<ProcessId, ClientState> clientStatesOLD = translateToLegacyClientStateMap(clients, assignmentState);
 
         // the below needs the old ClientStates, as I'm still using the old assignor
         assignStandbyReplicaTasks(applicationState, assignmentState, statefulTasks, clients.values(), clientStatesOLD);
@@ -116,7 +111,7 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         final Map<ProcessId, Set<TaskId>> warmups = new TreeMap<>();
 
         clientStatesOLD.clear();
-        clientStatesOLD = translateToLegacyClientStateMap(clients, assignmentState, applicationState);
+        clientStatesOLD = translateToLegacyClientStateMap(clients, assignmentState);
 
         // Lorcan
         final int neededActiveTaskMovements = assignActiveTaskMovements(
@@ -129,7 +124,6 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         );
 
         // Lorcan
-        // TODO: wrong again with potentially stale data
         final int neededStandbyTaskMovements = assignStandbyTaskMovements(
                 tasksToCaughtUpClients,
                 tasksToClientByLag,
@@ -144,7 +138,7 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         reorderDTOAndAssignmentState(assignmentState, clientStatesOLD);
         // after reorderDTOAndAssignmentState, newAssignments, DTO and clientState are all up to date
 
-        assignStatelessActiveTasks(applicationState, assignmentState, diff(TreeSet::new, applicationState.allTasks().keySet(), statefulTasks));
+        assignStatelessActiveTasks(assignmentState, diff(TreeSet::new, applicationState.allTasks().keySet(), statefulTasks));
         //
         optimizeStatelessTasks(applicationState, assignmentState);
 
@@ -175,19 +169,10 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             currentAssignment.assignedActiveTasks.taskIds = new HashSet<>(clientMap.getValue().activeTasks());
             currentAssignment.assignedStandbyTasks.taskIds = new HashSet<>(clientMap.getValue().standbyTasks());
 
-            // want to update below
-            // below is wrong as I'm updating the clientState and not the KafkaStreamsAssignment
-
             // final KafkaStreamsAssignment currentStreamsAssignment = assignmentState.newAssignments.get(clientMap.getKey());
             // up to date assigned tasks for given processId from ClientState
             final Set<TaskId> activeAssignedTaskIds = clientMap.getValue().activeTasks();
             final Set<TaskId> standbyAssignedTaskIds = clientMap.getValue().standbyTasks();
-
-
-
-            // assignmentState.newAssignments.get()
-            // below is wrong b/c we don't want to clear the processIds
-            // assignmentState.newAssignments.clear();
 
             for (final var blah : activeAssignedTaskIds) {
                 assignmentState.finalizeAssignment(blah, clientMap.getKey(), KafkaStreamsAssignment.AssignedTask.Type.ACTIVE);
@@ -196,39 +181,10 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             for (final var blah : standbyAssignedTaskIds) {
                 assignmentState.finalizeAssignment(blah, clientMap.getKey(), KafkaStreamsAssignment.AssignedTask.Type.STANDBY);
             }
-
-//            for (var blah : currentStreamsAssignment.tasks().entrySet()) {
-//            // switch (blah.getValue().type())
-//                // for stale assignments, if taskId not in clientStateMap, want to unassign it
-//                if (!activeAssignedTaskIds.contains(blah.getKey())) {
-//                    clientMap.getValue().unassignActive(blah.getKey());
-//                } else {
-//                    // intersection means it's already correctly assigned
-//                    activeAssignedTaskIds.remove(blah.getKey());
-//                }
-//                if (!standbyAssignedTaskIds.contains(blah.getKey())) {
-//                    clientMap.getValue().unassignStandby(blah.getKey());
-//                } else {
-//                    // intersection means it's already correctly assigned
-//                    standbyAssignedTaskIds.remove(blah.getKey());
-//                }
-//            }
-//            // now have all the taskIds, use that to get task and assign it
-//            for (var blah : activeAssignedTaskIds) {
-//                // is the task active or standby?
-//                clientMap.getValue().assignActive(blah);
-//            }
-//            for (var blah : standbyAssignedTaskIds) {
-//                clientMap.getValue().assignStandby(blah);
-//            }
         }
     }
 
-    // TODO: good first attempt
-    private TreeMap<ProcessId, ClientState> translateToLegacyClientStateMap(
-            final Map<ProcessId, KafkaStreamsState> newStates,
-            final AssignmentState assignmentState,
-            final ApplicationState applicationState) {
+    private TreeMap<ProcessId, ClientState> translateToLegacyClientStateMap(final Map<ProcessId, KafkaStreamsState> newStates, final AssignmentState assignmentState) {
 
         final TreeMap<ProcessId, ClientState> legacyClientStates = new TreeMap<>();
 
@@ -261,7 +217,6 @@ public class HighAvailabilityAssignor implements TaskAssignor {
 
         // assign active and standby tasks to correctly populate the ClientState map
         // this is super ugly and quite expensive to do
-
         for (final var thing : assignmentState.mapProcessToClientStateRebalanceDTO.entrySet()) {
             final ClientState clientStateToUpdate = legacyClientStates.get(thing.getKey());
             if (clientStateToUpdate != null) {
@@ -277,11 +232,8 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         return legacyClientStates;
     }
 
-    // TODO: not sure if ClientState object is being fully correctly updated
     private void updateDTOAndClientStateStandbys(final AssignmentState assignmentState, final Map<ProcessId, ClientState> clientStateMap) {
 
-        // for each processId, want all of the assigned standby tasks, then assign then to the DTO
-        // and the clientStates map
         for (final var thing : assignmentState.newAssignments.values()) {
             final var t = thing.tasks().entrySet().stream()
                     .filter(b -> b.getValue().type() == STANDBY)
@@ -296,20 +248,12 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             // below is awful but necessary atm
             final ClientState currentClientState = clientStateMap.get(thing.processId());
             currentClientState.standbyTasks().clear();
-//            for (final TaskId taskId : currentClientState.standbyTasks()) {
-//                currentClientState.unassignStandby(taskId);
-//            }
 
             for (final TaskId taskId : t) {
                 currentClientState.assignStandby(taskId);
             }
         }
 
-//        for (var thing : assignmentState.)
-//        for (var thing : assignmentState.mapProcessToClientStateRebalanceDTO.entrySet()) {
-//            ProcessId currentProcessId = thing.getKey();
-//            thing.getValue()
-//        }
     }
 
     // when do I need to update this?
@@ -367,12 +311,10 @@ public class HighAvailabilityAssignor implements TaskAssignor {
     }
 
     // here we want to loop in a similar way to the original method
-    private static void assignActiveStatefulTasks(final ApplicationState applicationState,
-                                                  final AssignmentState assignmentState,
+    private static void assignActiveStatefulTasks(final AssignmentState assignmentState,
                                                   final SortedSet<TaskId> statefulTasks,
                                                   final Collection<KafkaStreamsState> clients) {
 
-        // think the below is initially just round robin
         Iterator<HighAvailabilityClientState> highAvailabilityClientStateIterator = null;
         for (final TaskId task : statefulTasks) {
             if (highAvailabilityClientStateIterator == null || !highAvailabilityClientStateIterator.hasNext()) {
@@ -380,23 +322,6 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             }
             highAvailabilityClientStateIterator.next().assignActive(task);
         }
-
-        // Lorcan
-        // commented out the below because want to use the HAA client object
-//        // ugly but might be it
-//        final List<TaskId> sortedStatefulTasks = new ArrayList<>(statefulTasks);
-//        Collections.sort(sortedStatefulTasks);
-//        final SortedSet<ProcessId> candidateClients = (SortedSet<ProcessId>) clients.stream()
-//                .map(KafkaStreamsState::processId)
-//                .collect(Collectors.toSet());
-//        Iterator<ProcessId> consumerClientIdIterator = null;
-//        for (final TaskId task : sortedStatefulTasks) {
-//            if (consumerClientIdIterator == null || !consumerClientIdIterator.hasNext()) {
-//                consumerClientIdIterator = candidateClients.iterator();
-//            }
-//
-//            assignmentState.finalizeAssignment(task, consumerClientIdIterator.next(), KafkaStreamsAssignment.AssignedTask.Type.ACTIVE);
-//        }
 
         balanceTasksOverThreads(
                 assignmentState.mapProcessToClientStateRebalanceDTO,
@@ -433,8 +358,7 @@ public class HighAvailabilityAssignor implements TaskAssignor {
     }
 
     // might need to split this, not 100% sure though
-    private void optimiseActiveStatefulTasks(final ApplicationState applicationState,
-                                final AssignmentState assignmentState) {
+    private void optimiseActiveStatefulTasks(final ApplicationState applicationState, final AssignmentState assignmentState) {
 
         final Map<ProcessId, KafkaStreamsAssignment> assignments = assignmentState.newAssignments;
 
@@ -491,8 +415,7 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         }
     }
 
-    private static void assignStatelessActiveTasks(final ApplicationState applicationState,
-                                                   final AssignmentState assignmentState,
+    private static void assignStatelessActiveTasks(final AssignmentState assignmentState,
                                                    final Iterable<TaskId> statelessTasks) {
 
         final ConstrainedPrioritySet statelessActiveTaskClientsByTaskLoad = new ConstrainedPrioritySet(
@@ -639,14 +562,12 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         }
     }
 
-    // should only have a single assignmentState
     public static class AssignmentState {
         private Map<ProcessId, KafkaStreamsAssignment> newAssignments;
         private final SortedMap<ProcessId, HighAvailabilityClientState> mapProcessToClientStateRebalanceDTO;
 
         // do I need assigned active and assigned standby
-        AssignmentState(final ApplicationState applicationState,
-                        final Map<ProcessId, KafkaStreamsState> clients) {
+        AssignmentState(final Map<ProcessId, KafkaStreamsState> clients) {
 
             // Lorcan
             this.newAssignments = clients.values().stream().collect(Collectors.toMap(
@@ -655,8 +576,6 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             ));
 
             // Lorcan
-            // If there are duplicates, just take the current value
-            // might be wrong
             this.mapProcessToClientStateRebalanceDTO = clients.values().stream().collect(Collectors.toMap(
                     KafkaStreamsState::processId,
                     state -> new HighAvailabilityClientState(state.processId(), state.numProcessingThreads()),
@@ -679,12 +598,9 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             });
         }
 
-        // TODO: might need to update this
         // need this to update mapProcessToClientStateRebalanceDTO
         // need the below to then create this from the other map
         private void finalizeAssignment(final TaskId taskId, final ProcessId client, final KafkaStreamsAssignment.AssignedTask.Type type) {
-            // currently null pointer but will just want to update this at the end
-            // want to check if has been assigned already because passing in the whole thing for standby currently which I think is wrong
             newAssignments.get(client).assignTask(new KafkaStreamsAssignment.AssignedTask(taskId, type));
         }
 
@@ -780,6 +696,8 @@ public class HighAvailabilityAssignor implements TaskAssignor {
             return taskIds;
         }
 
+        // Lorcan
+        // this is never used so why do we have it
         Map<String, Set<TaskId>> consumerToTaskIds() {
             return consumerToTaskIds;
         }
@@ -870,26 +788,5 @@ public class HighAvailabilityAssignor implements TaskAssignor {
         double activeTaskLoad() {
             return ((double) activeTaskCount()) / capacity;
         }
-
-        // should have methods to just set the whole set of task ids to be that, but a bit dangerous because doing without the check
-
-//        void setAllActiveTasks(Set<TaskId> newActiveTasks) {
-//            assignedActiveTasks.taskIds
-//        }
-
-//        /**
-//         * Returns the total lag across all logged stores in the task. Equal to the end offset sum if this client
-//         * did not have any state for this task on disk.
-//         *
-//         * @return end offset sum - offset sum
-//         *          Task.LATEST_OFFSET if this was previously an active running task on this client
-//         */
-//        public long lagFor(final TaskId task) {
-//            final Long totalLag = taskLagTotals.get(task);
-//            if (totalLag == null) {
-//                throw new IllegalStateException("Tried to lookup lag for unknown task " + task);
-//            }
-//            return totalLag;
-//        }
     }
 }
