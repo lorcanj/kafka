@@ -860,6 +860,8 @@ public class CustomStickyTaskAssignorTest {
         return assignments.stream().collect(Collectors.toMap(KafkaStreamsAssignment::processId, assignment -> assignment));
     }
 
+    // Lorcan
+    // will want to move these to its own class as I need them in my tests too
     private Set<TaskId> activeTasks(final Map<ProcessId, KafkaStreamsAssignment> assignments,
                                     final int client) {
         final KafkaStreamsAssignment assignment = assignments.getOrDefault(processId(client), null);

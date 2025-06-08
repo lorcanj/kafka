@@ -507,19 +507,7 @@ public final class AssignmentTestUtils {
 
         return new TaskSkewReport(maxTaskSkew, skewedSubtopologies, subtopologyToClientsWithPartition);
     }
-
-    static Matcher<ClientState> hasAssignedTasks(final int taskCount) {
-        return hasProperty("assignedTasks", ClientState::assignedTaskCount, taskCount);
-    }
-
-    static Matcher<ClientState> hasActiveTasks(final int taskCount) {
-        return hasProperty("activeTasks", ClientState::activeTaskCount, taskCount);
-    }
-
-    static Matcher<ClientState> hasStandbyTasks(final int taskCount) {
-        return hasProperty("standbyTasks", ClientState::standbyTaskCount, taskCount);
-    }
-
+    // will want to update this, check what Sticky does
     static <V> Matcher<ClientState> hasProperty(final String propertyName,
                                                 final Function<ClientState, V> propertyExtractor,
                                                 final V propertyValue) {

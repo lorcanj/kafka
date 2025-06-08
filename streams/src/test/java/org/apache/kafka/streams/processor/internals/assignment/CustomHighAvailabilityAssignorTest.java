@@ -455,32 +455,17 @@ public class CustomHighAvailabilityAssignorTest {
                 taskAssignment.assignment().stream()
                         .collect(Collectors.toMap(KafkaStreamsAssignment::processId, Function.identity()));
 
-        // no it shouldn't!!!!
-        // Assertions for PID_1 (should get all tasks as ACTIVE)
         final KafkaStreamsAssignment assignment1 = assignmentsByProcessId.get(PID_1);
         assertThat("PID_1 assignment should exist", assignment1, notNullValue());
-//        final long activeCount1 = assignment1.tasks().values().stream().filter(t -> t.type() == KafkaStreamsAssignment.AssignedTask.Type.ACTIVE).count();
-//        final long standbyCount1 = assignment1.tasks().values().stream().filter(t -> t.type() == KafkaStreamsAssignment.AssignedTask.Type.STANDBY).count();
         assertThat(assignment1.tasks().size(), is(allTaskIds.size()));
 
-//        assertThat(clientState2, hasAssignedTasks(allTaskIds.size()));
-//
-//        assertThat(clientState3, hasAssignedTasks(2));
-//
-//        assertThat(unstable, is(true));
 
-        // Assertions for PID_2 (should get all tasks as STANDBY)
         final KafkaStreamsAssignment assignment2 = assignmentsByProcessId.get(PID_2);
         assertThat("PID_2 assignment should exist", assignment2, notNullValue());
-//        final long activeCount2 = assignment2.tasks().values().stream().filter(t -> t.type() == KafkaStreamsAssignment.AssignedTask.Type.ACTIVE).count();
-//        final long standbyCount2 = assignment2.tasks().values().stream().filter(t -> t.type() == KafkaStreamsAssignment.AssignedTask.Type.STANDBY).count();
         assertThat(assignment2.tasks().size(), is(allTaskIds.size()));
 
-        // Assertions for PID_3 (should get maxWarmupReplicas = 2 tasks as STANDBY/warmup)
         final KafkaStreamsAssignment assignment3 = assignmentsByProcessId.get(PID_3);
         assertThat("PID_3 assignment should exist", assignment3, notNullValue());
-//        final long activeCount3 = assignment3.tasks().values().stream().filter(t -> t.type() == KafkaStreamsAssignment.AssignedTask.Type.ACTIVE).count();
-//        final long standbyCount3 = assignment3.tasks().values().stream().filter(t -> t.type() == KafkaStreamsAssignment.AssignedTask.Type.STANDBY).count();
         assertThat(assignment3.tasks().size(), is(2));
 
         // Assert that a probing rebalance IS scheduled
